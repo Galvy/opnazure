@@ -1,3 +1,21 @@
+## Active-Backup OpenVPN variant (this fork)
+
+This fork adds **Active-Backup** to the deployment wizard and Bicep template:
+two OPNsense VMs, one OpenVPN endpoint, a Blob lease witness, managed identities,
+OpenVPN-aware LB probes and automatic peer VM fencing on an unclean failover.
+Clients reconnect after failover; sessions are not replicated. The agent remains
+disarmed until OpenVPN authentication/certificates are configured on both nodes.
+
+Read the [deployment, arming, upgrade and acceptance-test guide](docs/active-backup.md).
+Use [the example parameters](bicep/active-backup.parameters.json) in a new staging
+resource group first. This is not an in-place conversion of an existing pair.
+
+[Deploy Active-Backup fork in Azure](https://portal.azure.com/#view/Microsoft_Azure_CreateUIDef/CustomDeploymentBlade/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-openvpn%2FARM%2Fmain.json/uiFormDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-openvpn%2FARM%2FuiFormDefinition.json)
+(select **Active-Backup** and set your administrator CIDR).
+
+The upstream documentation below describes the original scenarios. Its upstream
+deployment links do **not** deploy this fork's Active-Backup implementation.
+
 # OPNsense Firewall on FreeBSD VM
 
 CI Name | Actions Workflow | CI Status |

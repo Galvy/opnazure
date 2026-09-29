@@ -3,7 +3,7 @@ param trustedSubnetId string = ''
 param publicIPId string = ''
 param virtualMachineName string
 param TempUsername string
-#disable-next-line secure-secrets-in-params
+@secure()
 param TempPassword string
 param virtualMachineSize string
 param OPNScriptURI string
@@ -14,6 +14,8 @@ param ExternalLoadBalancerBackendAddressPoolId string = ''
 param InternalLoadBalancerBackendAddressPoolId string = ''
 param ExternalloadBalancerInboundNatRulesId string = ''
 param ShellScriptObj object = {}
+param managedIdentityId string = ''
+param availabilitySetId string = ''
 param multiNicSupport bool
 param Location string = resourceGroup().location
 
@@ -57,7 +59,12 @@ module trustedNic '../vnet/nic.bicep' = if(multiNicSupport){
 resource OPNsense 'Microsoft.Compute/virtualMachines@2023-07-01' = {
   name: virtualMachineName
   location: Location
+  identity: empty(managedIdentityId) ? null : {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${managedIdentityId}': {} }
+  }
   properties: {
+    availabilitySet: empty(availabilitySetId) ? null : { id: availabilitySetId }
     osProfile: {
       computerName: virtualMachineName
       adminUsername: TempUsername
@@ -86,7 +93,7 @@ resource OPNsense 'Microsoft.Compute/virtualMachines@2023-07-01' = {
           }
         }
         {
-          id: trustedNic.outputs.nicId
+          id: trustedNic!.outputs.nicId
           properties:{
             primary: false
           }
@@ -121,11 +128,11 @@ resource vmext 'Microsoft.Compute/virtualMachines/extensions@2023-07-01' = {
       fileUris: [
         '${OPNScriptURI}${ShellScriptName}'
       ]
-      commandToExecute: 'sh ${ShellScriptName} ${ShellScriptObj.OpnScriptURI} ${ShellScriptObj.OpnVersion} ${ShellScriptObj.WALinuxVersion} ${ShellScriptObj.OpnType} ${!empty(ShellScriptObj.TrustedSubnetName) ? contains(trustedSubnet.properties, 'addressPrefixes') ? trustedSubnet.properties.addressPrefixes[0] : trustedSubnet.properties.addressPrefix : ''} ${!empty(ShellScriptObj.WindowsSubnetName) ? contains(windowsvmsubnet.properties, 'addressPrefixes') ? windowsvmsubnet.properties.addressPrefixes[0] : windowsvmsubnet.properties.addressPrefix : '1.1.1.1/32'} ${ShellScriptObj.publicIPAddress} ${ShellScriptObj.opnSenseSecondarytrustedNicIP}'
+      commandToExecute: 'sh ${ShellScriptName} ${ShellScriptObj.OpnScriptURI} ${ShellScriptObj.OpnVersion} ${ShellScriptObj.WALinuxVersion} ${ShellScriptObj.OpnType} ${!empty(ShellScriptObj.TrustedSubnetName) ? contains(trustedSubnet!.properties, 'addressPrefixes') ? trustedSubnet!.properties.addressPrefixes[0] : trustedSubnet!.properties.addressPrefix : ''} ${!empty(ShellScriptObj.WindowsSubnetName) ? contains(windowsvmsubnet!.properties, 'addressPrefixes') ? windowsvmsubnet!.properties.addressPrefixes[0] : windowsvmsubnet!.properties.addressPrefix : '1.1.1.1/32'} ${ShellScriptObj.publicIPAddress} ${empty(ShellScriptObj.opnSenseSecondarytrustedNicIP) ? '-' : ShellScriptObj.opnSenseSecondarytrustedNicIP} ${contains(ShellScriptObj, 'HaConfig') && !empty(ShellScriptObj.HaConfig) ? ShellScriptObj.HaConfig : '-'}'
     }
   }
 }
 
 output untrustedNicIP string = untrustedNic.outputs.nicIP
-output trustedNicIP string = multiNicSupport == true ? trustedNic.outputs.nicIP : ''
+output trustedNicIP string = multiNicSupport == true ? trustedNic!.outputs.nicIP : ''
 output untrustedNicProfileId string = untrustedNic.outputs.nicIpConfigurationId

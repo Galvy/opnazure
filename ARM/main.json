@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.41.2.15936",
-      "templateHash": "225539892994185229"
+      "version": "0.47.16.16243",
+      "templateHash": "5924533623859246593"
     }
   },
   "parameters": {
@@ -14,10 +14,11 @@
       "defaultValue": "TwoNics",
       "allowedValues": [
         "Active-Active",
+        "Active-Backup",
         "TwoNics"
       ],
       "metadata": {
-        "description": "Select a valid scenario. Active Active: Two OPNSenses deployed in HA mode using SLB and ILB. Two Nics: Single OPNSense deployed with two Nics."
+        "description": "Select a valid scenario. Active Active: Two OPNSenses deployed in HA mode using SLB and ILB. Active Backup: Two nodes with a Blob lease, VM fencing and OpenVPN-aware probes. Two Nics: Single OPNSense deployed with two Nics."
       }
     },
     "virtualMachineSize": {
@@ -97,7 +98,7 @@
     },
     "OpnScriptURI": {
       "type": "string",
-      "defaultValue": "https://raw.githubusercontent.com/dmauser/opnazure/master/scripts/",
+      "defaultValue": "https://raw.githubusercontent.com/Galvy/opnazure/feature/active-backup-openvpn/scripts/",
       "metadata": {
         "description": "URI for Custom OPN Script and Config"
       }
@@ -161,9 +162,36 @@
     "Location": {
       "type": "string",
       "defaultValue": "[resourceGroup().location]"
+    },
+    "OpenVpnPort": {
+      "type": "int",
+      "defaultValue": 1194,
+      "minValue": 1,
+      "maxValue": 65535,
+      "metadata": {
+        "description": "OpenVPN UDP port published by the Active-Backup load balancer."
+      }
+    },
+    "HaProbePort": {
+      "type": "int",
+      "defaultValue": 8080,
+      "minValue": 1024,
+      "maxValue": 65535,
+      "metadata": {
+        "description": "Private HTTP probe port for the Active-Backup agent; do not expose publicly."
+      }
+    },
+    "ManagementSourceCIDR": {
+      "type": "string",
+      "defaultValue": "127.0.0.1/32",
+      "metadata": {
+        "description": "Administrator public IPv4 CIDR allowed to reach management ports for Active-Backup. Replace the loopback default before deployment."
+      }
     }
   },
   "variables": {
+    "isHa": "[not(equals(parameters('scenarioOption'), 'TwoNics'))]",
+    "isActiveBackup": "[equals(parameters('scenarioOption'), 'Active-Backup')]",
     "TempUsername": "azureuser",
     "TempPassword": "[guid(subscription().id, resourceGroup().id)]",
     "untrustedSubnetName": "Untrusted-Subnet",
@@ -194,6 +222,20 @@
   },
   "resources": [
     {
+      "condition": "[variables('isActiveBackup')]",
+      "type": "Microsoft.Compute/availabilitySets",
+      "apiVersion": "2023-07-01",
+      "name": "[format('{0}-HA', parameters('virtualMachineName'))]",
+      "location": "[parameters('Location')]",
+      "sku": {
+        "name": "Aligned"
+      },
+      "properties": {
+        "platformFaultDomainCount": 2,
+        "platformUpdateDomainCount": 2
+      }
+    },
+    {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[variables('networkSecurityGroupName')]",
@@ -210,34 +252,7 @@
             "value": "[variables('networkSecurityGroupName')]"
           },
           "securityRules": {
-            "value": [
-              {
-                "name": "In-Any",
-                "properties": {
-                  "priority": 4096,
-                  "sourceAddressPrefix": "*",
-                  "protocol": "*",
-                  "destinationPortRange": "*",
-                  "access": "Allow",
-                  "direction": "Inbound",
-                  "sourcePortRange": "*",
-                  "destinationAddressPrefix": "*"
-                }
-              },
-              {
-                "name": "Out-Any",
-                "properties": {
-                  "priority": 4096,
-                  "sourceAddressPrefix": "*",
-                  "protocol": "*",
-                  "destinationPortRange": "*",
-                  "access": "Allow",
-                  "direction": "Outbound",
-                  "sourcePortRange": "*",
-                  "destinationAddressPrefix": "*"
-                }
-              }
-            ]
+            "value": "[concat(if(variables('isActiveBackup'), createArray(createObject('name', 'Allow-HA-Management', 'properties', createObject('priority', 100, 'sourceAddressPrefix', parameters('ManagementSourceCIDR'), 'protocol', 'Tcp', 'destinationPortRanges', createArray('22', '443'), 'access', 'Allow', 'direction', 'Inbound', 'sourcePortRange', '*', 'destinationAddressPrefix', '*')), createObject('name', 'Deny-Internet-Management', 'properties', createObject('priority', 110, 'sourceAddressPrefix', 'Internet', 'protocol', 'Tcp', 'destinationPortRanges', createArray('22', '443'), 'access', 'Deny', 'direction', 'Inbound', 'sourcePortRange', '*', 'destinationAddressPrefix', '*'))), createArray()), createArray(createObject('name', 'In-Any', 'properties', createObject('priority', 4096, 'sourceAddressPrefix', '*', 'protocol', '*', 'destinationPortRange', '*', 'access', 'Allow', 'direction', 'Inbound', 'sourcePortRange', '*', 'destinationAddressPrefix', '*')), createObject('name', 'Out-Any', 'properties', createObject('priority', 4096, 'sourceAddressPrefix', '*', 'protocol', '*', 'destinationPortRange', '*', 'access', 'Allow', 'direction', 'Outbound', 'sourcePortRange', '*', 'destinationAddressPrefix', '*'))))]"
           }
         },
         "template": {
@@ -246,8 +261,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "9736125486719907374"
+              "version": "0.47.16.16243",
+              "templateHash": "14054936748490952447"
             }
           },
           "parameters": {
@@ -311,8 +326,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "15757332532365213320"
+              "version": "0.47.16.16243",
+              "templateHash": "8875239107211122938"
             }
           },
           "parameters": {
@@ -384,7 +399,7 @@
           },
           "publicipsku": {
             "value": {
-              "name": "[parameters('PublicIPAddressSku')]",
+              "name": "[if(variables('isHa'), 'Standard', parameters('PublicIPAddressSku'))]",
               "tier": "Regional"
             }
           }
@@ -395,8 +410,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "15784575677056673163"
+              "version": "0.47.16.16243",
+              "templateHash": "12725009938471022116"
             }
           },
           "parameters": {
@@ -438,7 +453,7 @@
       }
     },
     {
-      "condition": "[equals(parameters('scenarioOption'), 'Active-Active')]",
+      "condition": "[variables('isHa')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[variables('externalLoadBalanceName')]",
@@ -476,12 +491,12 @@
           "loadBalancingRules": {
             "value": [
               {
-                "name": "[variables('externalLoadBalancingRuleName')]",
+                "name": "[if(variables('isActiveBackup'), 'OpenVPN', variables('externalLoadBalancingRuleName'))]",
                 "properties": {
-                  "frontendPort": 3389,
-                  "backendPort": 3389,
-                  "enableFloatingIP": true,
-                  "protocol": "Tcp",
+                  "frontendPort": "[if(variables('isActiveBackup'), parameters('OpenVpnPort'), 3389)]",
+                  "backendPort": "[if(variables('isActiveBackup'), parameters('OpenVpnPort'), 3389)]",
+                  "enableFloatingIP": "[not(variables('isActiveBackup'))]",
+                  "protocol": "[if(variables('isActiveBackup'), 'Udp', 'Tcp')]",
                   "frontendIPConfiguration": {
                     "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('externalLoadBalanceName'), variables('externalLoadBalanceFIPConfName'))]"
                   },
@@ -532,8 +547,9 @@
               {
                 "name": "[variables('externalLoadBalanceProbeName')]",
                 "properties": {
-                  "port": 443,
-                  "protocol": "Tcp",
+                  "port": "[if(variables('isActiveBackup'), parameters('HaProbePort'), 443)]",
+                  "protocol": "[if(variables('isActiveBackup'), 'Http', 'Tcp')]",
+                  "requestPath": "[if(variables('isActiveBackup'), '/health', null())]",
                   "intervalInSeconds": 5,
                   "numberOfProbes": 2
                 }
@@ -568,8 +584,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "7316187731990327606"
+              "version": "0.47.16.16243",
+              "templateHash": "16680864936622746702"
             }
           },
           "parameters": {
@@ -646,7 +662,7 @@
       ]
     },
     {
-      "condition": "[equals(parameters('scenarioOption'), 'Active-Active')]",
+      "condition": "[variables('isHa')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[variables('internalLoadBalanceName')]",
@@ -715,8 +731,9 @@
               {
                 "name": "[variables('internalLoadBalanceProbeName')]",
                 "properties": {
-                  "port": 443,
-                  "protocol": "Tcp",
+                  "port": "[if(variables('isActiveBackup'), parameters('HaProbePort'), 443)]",
+                  "protocol": "[if(variables('isActiveBackup'), 'Http', 'Tcp')]",
+                  "requestPath": "[if(variables('isActiveBackup'), '/health', null())]",
                   "intervalInSeconds": 5,
                   "numberOfProbes": 2
                 }
@@ -730,8 +747,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "7316187731990327606"
+              "version": "0.47.16.16243",
+              "templateHash": "16680864936622746702"
             }
           },
           "parameters": {
@@ -810,7 +827,7 @@
       ]
     },
     {
-      "condition": "[equals(parameters('scenarioOption'), 'Active-Active')]",
+      "condition": "[variables('isHa')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[variables('VMOPNsenseSecondaryName')]",
@@ -823,12 +840,15 @@
           "Location": {
             "value": "[parameters('Location')]"
           },
+          "managedIdentityId": "[if(variables('isActiveBackup'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.secondaryIdentity.value.id), createObject('value', ''))]",
+          "availabilitySetId": "[if(variables('isActiveBackup'), createObject('value', resourceId('Microsoft.Compute/availabilitySets', format('{0}-HA', parameters('virtualMachineName')))), createObject('value', ''))]",
           "ShellScriptObj": {
             "value": {
               "OpnScriptURI": "[parameters('OpnScriptURI')]",
               "OpnVersion": "[parameters('OpnVersion')]",
               "WALinuxVersion": "[parameters('WALinuxVersion')]",
               "OpnType": "Secondary",
+              "HaConfig": "[if(variables('isActiveBackup'), base64(string(createObject('node', 'Secondary', 'client_id', reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.secondaryIdentity.value.clientId, 'blob_url', reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.blobUrl.value, 'peer_vm_id', resourceId('Microsoft.Compute/virtualMachines', variables('VMOPNsensePrimaryName')), 'probe_port', parameters('HaProbePort'), 'openvpn_port', parameters('OpenVpnPort')))), '')]",
               "TrustedSubnetName": "[format('{0}/{1}', parameters('virtualNetworkName'), if(variables('useexistingvirtualNetwork'), parameters('existingTrustedSubnetName'), variables('trustedSubnetName')))]",
               "WindowsSubnetName": "[if(parameters('DeployWindows'), format('{0}/{1}', parameters('virtualNetworkName'), if(variables('useexistingvirtualNetwork'), parameters('existingWindowsSubnet'), variables('windowsvmsubnetname'))), '')]",
               "publicIPAddress": "[reference(resourceId('Microsoft.Resources/deployments', variables('publicIPAddressName')), '2025-04-01').outputs.publicipAddress.value]",
@@ -865,9 +885,9 @@
           "nsgId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('networkSecurityGroupName')), '2025-04-01').outputs.nsgID.value]"
           },
-          "ExternalLoadBalancerBackendAddressPoolId": "[if(equals(parameters('scenarioOption'), 'Active-Active'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
-          "InternalLoadBalancerBackendAddressPoolId": "[if(equals(parameters('scenarioOption'), 'Active-Active'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
-          "ExternalloadBalancerInboundNatRulesId": "[if(equals(parameters('scenarioOption'), 'Active-Active'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.inboundNatRules.value[1].id), createObject('value', ''))]"
+          "ExternalLoadBalancerBackendAddressPoolId": "[if(variables('isHa'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
+          "InternalLoadBalancerBackendAddressPoolId": "[if(variables('isHa'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
+          "ExternalloadBalancerInboundNatRulesId": "[if(variables('isHa'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.inboundNatRules.value[1].id), createObject('value', ''))]"
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -875,8 +895,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "13177166160884431509"
+              "version": "0.47.16.16243",
+              "templateHash": "868150048232230524"
             }
           },
           "parameters": {
@@ -898,7 +918,7 @@
               "type": "string"
             },
             "TempPassword": {
-              "type": "string"
+              "type": "securestring"
             },
             "virtualMachineSize": {
               "type": "string"
@@ -929,6 +949,14 @@
               "type": "object",
               "defaultValue": {}
             },
+            "managedIdentityId": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "availabilitySetId": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "multiNicSupport": {
               "type": "bool"
             },
@@ -947,7 +975,9 @@
               "apiVersion": "2023-07-01",
               "name": "[parameters('virtualMachineName')]",
               "location": "[parameters('Location')]",
+              "identity": "[if(empty(parameters('managedIdentityId')), null(), createObject('type', 'UserAssigned', 'userAssignedIdentities', createObject(format('{0}', parameters('managedIdentityId')), createObject())))]",
               "properties": {
+                "availabilitySet": "[if(empty(parameters('availabilitySetId')), null(), createObject('id', parameters('availabilitySetId')))]",
                 "osProfile": {
                   "computerName": "[parameters('virtualMachineName')]",
                   "adminUsername": "[parameters('TempUsername')]",
@@ -995,7 +1025,7 @@
                   "fileUris": [
                     "[format('{0}{1}', parameters('OPNScriptURI'), parameters('ShellScriptName'))]"
                   ],
-                  "commandToExecute": "[format('sh {0} {1} {2} {3} {4} {5} {6} {7} {8}', parameters('ShellScriptName'), parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptObj').OpnVersion, parameters('ShellScriptObj').WALinuxVersion, parameters('ShellScriptObj').OpnType, if(not(empty(parameters('ShellScriptObj').TrustedSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), ''), if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '1.1.1.1/32'), parameters('ShellScriptObj').publicIPAddress, parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP)]"
+                  "commandToExecute": "[format('sh {0} {1} {2} {3} {4} {5} {6} {7} {8} {9}', parameters('ShellScriptName'), parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptObj').OpnVersion, parameters('ShellScriptObj').WALinuxVersion, parameters('ShellScriptObj').OpnType, if(not(empty(parameters('ShellScriptObj').TrustedSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), ''), if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '1.1.1.1/32'), parameters('ShellScriptObj').publicIPAddress, if(empty(parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP), '-', parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP), if(and(contains(parameters('ShellScriptObj'), 'HaConfig'), not(empty(parameters('ShellScriptObj').HaConfig))), parameters('ShellScriptObj').HaConfig, '-'))]"
                 }
               },
               "dependsOn": [
@@ -1043,8 +1073,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.41.2.15936",
-                      "templateHash": "855039572727018889"
+                      "version": "0.47.16.16243",
+                      "templateHash": "9914891490764381331"
                     }
                   },
                   "parameters": {
@@ -1164,8 +1194,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.41.2.15936",
-                      "templateHash": "855039572727018889"
+                      "version": "0.47.16.16243",
+                      "templateHash": "9914891490764381331"
                     }
                   },
                   "parameters": {
@@ -1268,14 +1298,16 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName'))]",
+        "[resourceId('Microsoft.Compute/availabilitySets', format('{0}-HA', parameters('virtualMachineName')))]",
         "[resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName'))]",
         "[resourceId('Microsoft.Resources/deployments', variables('networkSecurityGroupName'))]",
         "[resourceId('Microsoft.Resources/deployments', variables('publicIPAddressName'))]",
-        "[resourceId('Microsoft.Resources/deployments', parameters('virtualNetworkName'))]"
+        "[resourceId('Microsoft.Resources/deployments', parameters('virtualNetworkName'))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName')))]"
       ]
     },
     {
-      "condition": "[equals(parameters('scenarioOption'), 'Active-Active')]",
+      "condition": "[variables('isHa')]",
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "[variables('VMOPNsensePrimaryName')]",
@@ -1288,16 +1320,19 @@
           "Location": {
             "value": "[parameters('Location')]"
           },
+          "managedIdentityId": "[if(variables('isActiveBackup'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.primaryIdentity.value.id), createObject('value', ''))]",
+          "availabilitySetId": "[if(variables('isActiveBackup'), createObject('value', resourceId('Microsoft.Compute/availabilitySets', format('{0}-HA', parameters('virtualMachineName')))), createObject('value', ''))]",
           "ShellScriptObj": {
             "value": {
               "OpnScriptURI": "[parameters('OpnScriptURI')]",
               "OpnVersion": "[parameters('OpnVersion')]",
               "WALinuxVersion": "[parameters('WALinuxVersion')]",
               "OpnType": "Primary",
+              "HaConfig": "[if(variables('isActiveBackup'), base64(string(createObject('node', 'Primary', 'client_id', reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.primaryIdentity.value.clientId, 'blob_url', reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.blobUrl.value, 'peer_vm_id', resourceId('Microsoft.Compute/virtualMachines', variables('VMOPNsenseSecondaryName')), 'probe_port', parameters('HaProbePort'), 'openvpn_port', parameters('OpenVpnPort')))), '')]",
               "TrustedSubnetName": "[format('{0}/{1}', parameters('virtualNetworkName'), if(variables('useexistingvirtualNetwork'), parameters('existingTrustedSubnetName'), variables('trustedSubnetName')))]",
               "WindowsSubnetName": "[if(parameters('DeployWindows'), format('{0}/{1}', parameters('virtualNetworkName'), if(variables('useexistingvirtualNetwork'), parameters('existingWindowsSubnet'), variables('windowsvmsubnetname'))), '')]",
               "publicIPAddress": "[reference(resourceId('Microsoft.Resources/deployments', variables('publicIPAddressName')), '2025-04-01').outputs.publicipAddress.value]",
-              "opnSenseSecondarytrustedNicIP": "[if(equals(parameters('scenarioOption'), 'Active-Active'), reference(resourceId('Microsoft.Resources/deployments', variables('VMOPNsenseSecondaryName')), '2025-04-01').outputs.trustedNicIP.value, '')]"
+              "opnSenseSecondarytrustedNicIP": "[if(variables('isHa'), reference(resourceId('Microsoft.Resources/deployments', variables('VMOPNsenseSecondaryName')), '2025-04-01').outputs.trustedNicIP.value, '')]"
             }
           },
           "OPNScriptURI": {
@@ -1330,9 +1365,9 @@
           "nsgId": {
             "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('networkSecurityGroupName')), '2025-04-01').outputs.nsgID.value]"
           },
-          "ExternalLoadBalancerBackendAddressPoolId": "[if(equals(parameters('scenarioOption'), 'Active-Active'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
-          "InternalLoadBalancerBackendAddressPoolId": "[if(equals(parameters('scenarioOption'), 'Active-Active'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
-          "ExternalloadBalancerInboundNatRulesId": "[if(equals(parameters('scenarioOption'), 'Active-Active'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.inboundNatRules.value[0].id), createObject('value', ''))]"
+          "ExternalLoadBalancerBackendAddressPoolId": "[if(variables('isHa'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
+          "InternalLoadBalancerBackendAddressPoolId": "[if(variables('isHa'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id), createObject('value', ''))]",
+          "ExternalloadBalancerInboundNatRulesId": "[if(variables('isHa'), createObject('value', reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.inboundNatRules.value[0].id), createObject('value', ''))]"
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
@@ -1340,8 +1375,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "13177166160884431509"
+              "version": "0.47.16.16243",
+              "templateHash": "868150048232230524"
             }
           },
           "parameters": {
@@ -1363,7 +1398,7 @@
               "type": "string"
             },
             "TempPassword": {
-              "type": "string"
+              "type": "securestring"
             },
             "virtualMachineSize": {
               "type": "string"
@@ -1394,6 +1429,14 @@
               "type": "object",
               "defaultValue": {}
             },
+            "managedIdentityId": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "availabilitySetId": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "multiNicSupport": {
               "type": "bool"
             },
@@ -1412,7 +1455,9 @@
               "apiVersion": "2023-07-01",
               "name": "[parameters('virtualMachineName')]",
               "location": "[parameters('Location')]",
+              "identity": "[if(empty(parameters('managedIdentityId')), null(), createObject('type', 'UserAssigned', 'userAssignedIdentities', createObject(format('{0}', parameters('managedIdentityId')), createObject())))]",
               "properties": {
+                "availabilitySet": "[if(empty(parameters('availabilitySetId')), null(), createObject('id', parameters('availabilitySetId')))]",
                 "osProfile": {
                   "computerName": "[parameters('virtualMachineName')]",
                   "adminUsername": "[parameters('TempUsername')]",
@@ -1460,7 +1505,7 @@
                   "fileUris": [
                     "[format('{0}{1}', parameters('OPNScriptURI'), parameters('ShellScriptName'))]"
                   ],
-                  "commandToExecute": "[format('sh {0} {1} {2} {3} {4} {5} {6} {7} {8}', parameters('ShellScriptName'), parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptObj').OpnVersion, parameters('ShellScriptObj').WALinuxVersion, parameters('ShellScriptObj').OpnType, if(not(empty(parameters('ShellScriptObj').TrustedSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), ''), if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '1.1.1.1/32'), parameters('ShellScriptObj').publicIPAddress, parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP)]"
+                  "commandToExecute": "[format('sh {0} {1} {2} {3} {4} {5} {6} {7} {8} {9}', parameters('ShellScriptName'), parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptObj').OpnVersion, parameters('ShellScriptObj').WALinuxVersion, parameters('ShellScriptObj').OpnType, if(not(empty(parameters('ShellScriptObj').TrustedSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), ''), if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '1.1.1.1/32'), parameters('ShellScriptObj').publicIPAddress, if(empty(parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP), '-', parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP), if(and(contains(parameters('ShellScriptObj'), 'HaConfig'), not(empty(parameters('ShellScriptObj').HaConfig))), parameters('ShellScriptObj').HaConfig, '-'))]"
                 }
               },
               "dependsOn": [
@@ -1508,8 +1553,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.41.2.15936",
-                      "templateHash": "855039572727018889"
+                      "version": "0.47.16.16243",
+                      "templateHash": "9914891490764381331"
                     }
                   },
                   "parameters": {
@@ -1629,8 +1674,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.41.2.15936",
-                      "templateHash": "855039572727018889"
+                      "version": "0.47.16.16243",
+                      "templateHash": "9914891490764381331"
                     }
                   },
                   "parameters": {
@@ -1733,11 +1778,13 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName'))]",
+        "[resourceId('Microsoft.Compute/availabilitySets', format('{0}-HA', parameters('virtualMachineName')))]",
         "[resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName'))]",
         "[resourceId('Microsoft.Resources/deployments', variables('networkSecurityGroupName'))]",
         "[resourceId('Microsoft.Resources/deployments', variables('VMOPNsenseSecondaryName'))]",
         "[resourceId('Microsoft.Resources/deployments', variables('publicIPAddressName'))]",
-        "[resourceId('Microsoft.Resources/deployments', parameters('virtualNetworkName'))]"
+        "[resourceId('Microsoft.Resources/deployments', parameters('virtualNetworkName'))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName')))]"
       ]
     },
     {
@@ -1806,8 +1853,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "13177166160884431509"
+              "version": "0.47.16.16243",
+              "templateHash": "868150048232230524"
             }
           },
           "parameters": {
@@ -1829,7 +1876,7 @@
               "type": "string"
             },
             "TempPassword": {
-              "type": "string"
+              "type": "securestring"
             },
             "virtualMachineSize": {
               "type": "string"
@@ -1860,6 +1907,14 @@
               "type": "object",
               "defaultValue": {}
             },
+            "managedIdentityId": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "availabilitySetId": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "multiNicSupport": {
               "type": "bool"
             },
@@ -1878,7 +1933,9 @@
               "apiVersion": "2023-07-01",
               "name": "[parameters('virtualMachineName')]",
               "location": "[parameters('Location')]",
+              "identity": "[if(empty(parameters('managedIdentityId')), null(), createObject('type', 'UserAssigned', 'userAssignedIdentities', createObject(format('{0}', parameters('managedIdentityId')), createObject())))]",
               "properties": {
+                "availabilitySet": "[if(empty(parameters('availabilitySetId')), null(), createObject('id', parameters('availabilitySetId')))]",
                 "osProfile": {
                   "computerName": "[parameters('virtualMachineName')]",
                   "adminUsername": "[parameters('TempUsername')]",
@@ -1926,7 +1983,7 @@
                   "fileUris": [
                     "[format('{0}{1}', parameters('OPNScriptURI'), parameters('ShellScriptName'))]"
                   ],
-                  "commandToExecute": "[format('sh {0} {1} {2} {3} {4} {5} {6} {7} {8}', parameters('ShellScriptName'), parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptObj').OpnVersion, parameters('ShellScriptObj').WALinuxVersion, parameters('ShellScriptObj').OpnType, if(not(empty(parameters('ShellScriptObj').TrustedSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), ''), if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '1.1.1.1/32'), parameters('ShellScriptObj').publicIPAddress, parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP)]"
+                  "commandToExecute": "[format('sh {0} {1} {2} {3} {4} {5} {6} {7} {8} {9}', parameters('ShellScriptName'), parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptObj').OpnVersion, parameters('ShellScriptObj').WALinuxVersion, parameters('ShellScriptObj').OpnType, if(not(empty(parameters('ShellScriptObj').TrustedSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), ''), if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '1.1.1.1/32'), parameters('ShellScriptObj').publicIPAddress, if(empty(parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP), '-', parameters('ShellScriptObj').opnSenseSecondarytrustedNicIP), if(and(contains(parameters('ShellScriptObj'), 'HaConfig'), not(empty(parameters('ShellScriptObj').HaConfig))), parameters('ShellScriptObj').HaConfig, '-'))]"
                 }
               },
               "dependsOn": [
@@ -1974,8 +2031,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.41.2.15936",
-                      "templateHash": "855039572727018889"
+                      "version": "0.47.16.16243",
+                      "templateHash": "9914891490764381331"
                     }
                   },
                   "parameters": {
@@ -2095,8 +2152,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.41.2.15936",
-                      "templateHash": "855039572727018889"
+                      "version": "0.47.16.16243",
+                      "templateHash": "9914891490764381331"
                     }
                   },
                   "parameters": {
@@ -2257,8 +2314,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "9736125486719907374"
+              "version": "0.47.16.16243",
+              "templateHash": "14054936748490952447"
             }
           },
           "parameters": {
@@ -2323,7 +2380,7 @@
           },
           "publicipsku": {
             "value": {
-              "name": "[parameters('PublicIPAddressSku')]",
+              "name": "[if(variables('isHa'), 'Standard', parameters('PublicIPAddressSku'))]",
               "tier": "Regional"
             }
           }
@@ -2334,8 +2391,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "15784575677056673163"
+              "version": "0.47.16.16243",
+              "templateHash": "12725009938471022116"
             }
           },
           "parameters": {
@@ -2405,8 +2462,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "11300237697152405636"
+              "version": "0.47.16.16243",
+              "templateHash": "11768790600776961353"
             }
           },
           "parameters": {
@@ -2460,7 +2517,7 @@
           "properties": {
             "value": {
               "nextHopType": "VirtualAppliance",
-              "nextHopIpAddress": "[if(equals(parameters('scenarioOption'), 'Active-Active'), reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.frontendIP.value.privateIPAddress, if(equals(parameters('scenarioOption'), 'TwoNics'), reference(resourceId('Microsoft.Resources/deployments', format('{0}-TwoNics', parameters('virtualMachineName'))), '2025-04-01').outputs.trustedNicIP.value, ''))]",
+              "nextHopIpAddress": "[if(variables('isHa'), reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.frontendIP.value.privateIPAddress, if(equals(parameters('scenarioOption'), 'TwoNics'), reference(resourceId('Microsoft.Resources/deployments', format('{0}-TwoNics', parameters('virtualMachineName'))), '2025-04-01').outputs.trustedNicIP.value, ''))]",
               "addressPrefix": "0.0.0.0/0"
             }
           }
@@ -2471,8 +2528,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "16296265924225491637"
+              "version": "0.47.16.16243",
+              "templateHash": "10164028375442850103"
             }
           },
           "parameters": {
@@ -2540,8 +2597,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "3666805275663742103"
+              "version": "0.47.16.16243",
+              "templateHash": "9642554463692688456"
             }
           },
           "parameters": {
@@ -2650,8 +2707,8 @@
                   "metadata": {
                     "_generator": {
                       "name": "bicep",
-                      "version": "0.41.2.15936",
-                      "templateHash": "855039572727018889"
+                      "version": "0.47.16.16243",
+                      "templateHash": "9914891490764381331"
                     }
                   },
                   "parameters": {
@@ -2751,6 +2808,305 @@
         "[resourceId('Microsoft.Resources/deployments', format('{0}-TwoNics', parameters('virtualMachineName')))]",
         "[resourceId('Microsoft.Resources/deployments', variables('winvmpublicipName'))]"
       ]
+    },
+    {
+      "condition": "[variables('isActiveBackup')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-ha-witness', parameters('virtualMachineName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('Location')]"
+          },
+          "clusterName": {
+            "value": "[parameters('virtualMachineName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "13430233569185017597"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "clusterName": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "accountName": "[format('opnha{0}', uniqueString(resourceGroup().id, parameters('clusterName')))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('accountName')]",
+              "location": "[parameters('location')]",
+              "kind": "StorageV2",
+              "sku": {
+                "name": "Standard_ZRS"
+              },
+              "properties": {
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true,
+                "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": false
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', variables('accountName'), 'default')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('accountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), 'default', 'witness')]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('accountName'), 'default')]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "identities",
+                "count": "[length(createArray('Primary', 'Secondary'))]"
+              },
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])]",
+              "location": "[parameters('location')]"
+            },
+            {
+              "copy": {
+                "name": "storageRoles",
+                "count": "[length(createArray('Primary', 'Secondary'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('accountName'), 'default', 'witness')]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('accountName'), 'default', 'witness'), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])), 'blob-data-contributor')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('accountName'), 'default', 'witness')]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleDefinitions",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, parameters('clusterName'), 'opnazure-fence')]",
+              "properties": {
+                "roleName": "[format('OPNazure fencing {0}', uniqueString(resourceGroup().id, parameters('clusterName')))]",
+                "description": "Read power state, hard-stop and restart only the assigned peer VM.",
+                "type": "CustomRole",
+                "assignableScopes": [
+                  "[resourceGroup().id]"
+                ],
+                "permissions": [
+                  {
+                    "actions": [
+                      "Microsoft.Compute/virtualMachines/read",
+                      "Microsoft.Compute/virtualMachines/instanceView/read",
+                      "Microsoft.Compute/virtualMachines/powerOff/action",
+                      "Microsoft.Compute/virtualMachines/start/action"
+                    ],
+                    "notActions": [],
+                    "dataActions": [],
+                    "notDataActions": []
+                  }
+                ]
+              }
+            }
+          ],
+          "outputs": {
+            "blobUrl": {
+              "type": "string",
+              "value": "[format('{0}witness/leader', reference(resourceId('Microsoft.Storage/storageAccounts', variables('accountName')), '2023-05-01').primaryEndpoints.blob)]"
+            },
+            "primaryIdentity": {
+              "type": "object",
+              "value": {
+                "id": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[0]))]",
+                "clientId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[0])), '2023-01-31').clientId]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[0])), '2023-01-31').principalId]"
+              }
+            },
+            "secondaryIdentity": {
+              "type": "object",
+              "value": {
+                "id": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[1]))]",
+                "clientId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[1])), '2023-01-31').clientId]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[1])), '2023-01-31').principalId]"
+              }
+            },
+            "fenceRoleId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'opnazure-fence'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "condition": "[variables('isActiveBackup')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-primary-fence-access', parameters('virtualMachineName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "peerVmName": {
+            "value": "[variables('VMOPNsenseSecondaryName')]"
+          },
+          "principalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.primaryIdentity.value.principalId]"
+          },
+          "roleDefinitionId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.fenceRoleId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "12249051507274384660"
+            }
+          },
+          "parameters": {
+            "peerVmName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            },
+            "roleDefinitionId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName'))]",
+              "name": "[guid(resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName')), parameters('principalId'), parameters('roleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[parameters('roleDefinitionId')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', variables('VMOPNsenseSecondaryName'))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName')))]"
+      ]
+    },
+    {
+      "condition": "[variables('isActiveBackup')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-secondary-fence-access', parameters('virtualMachineName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "peerVmName": {
+            "value": "[variables('VMOPNsensePrimaryName')]"
+          },
+          "principalId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.secondaryIdentity.value.principalId]"
+          },
+          "roleDefinitionId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName'))), '2025-04-01').outputs.fenceRoleId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "12249051507274384660"
+            }
+          },
+          "parameters": {
+            "peerVmName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            },
+            "roleDefinitionId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName'))]",
+              "name": "[guid(resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName')), parameters('principalId'), parameters('roleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[parameters('roleDefinitionId')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', variables('VMOPNsensePrimaryName'))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-ha-witness', parameters('virtualMachineName')))]"
+      ]
     }
-  ]
+  ],
+  "outputs": {
+    "publicIpAddress": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('publicIPAddressName')), '2025-04-01').outputs.publicipAddress.value]"
+    },
+    "internalNextHop": {
+      "type": "string",
+      "value": "[if(variables('isHa'), reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.frontendIP.value.privateIPAddress, reference(resourceId('Microsoft.Resources/deployments', format('{0}-TwoNics', parameters('virtualMachineName'))), '2025-04-01').outputs.trustedNicIP.value)]"
+    },
+    "activeBackupSetup": {
+      "type": "string",
+      "value": "[if(variables('isActiveBackup'), 'Configure OpenVPN on both nodes, then follow docs/active-backup.md to arm HA. Probes remain down until armed.', '')]"
+    }
+  }
 }

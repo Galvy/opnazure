@@ -24,6 +24,7 @@
 # $6 = WindowsVMSubnet   Windows Management VM subnet prefix (for routing)
 # $7 = ELBVip            External Load Balancer VIP (Primary only)
 # $8 = SecondaryIP       Private IP of Secondary OPNsense server (Primary only)
+# $9 = HAConfig          Optional base64 JSON for the Active-Backup agent
 
 OPN_SCRIPT_URI="$1"
 OPN_VERSION="$2"
@@ -33,6 +34,11 @@ TRUSTED_SUBNET="${5:-}"
 WINDOWS_VM_SUBNET="${6:-}"
 ELB_VIP="${7:-}"
 SECONDARY_IP="${8:-}"
+HA_CONFIG="${9:--}"
+NODE_ROLE="$ROLE"
+if [ "$HA_CONFIG" != "-" ]; then
+    ROLE="Secondary"
+fi
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 log() {
@@ -108,7 +114,12 @@ sed -i "" 's/#PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
 #   - Delay reboot by 1 minute so the rest of this script can finish
 log "Patching bootstrap script..."
 sed -i "" "s/set -e/#set -e/g" opnsense-bootstrap.sh.in
-sed -i "" "s/reboot/shutdown -r +1/g" opnsense-bootstrap.sh.in
+if [ "$HA_CONFIG" != "-" ]; then
+    # Do not race package/download work against a scheduled reboot.
+    sed -i "" 's/^[[:space:]]*reboot$/: # reboot deferred until HA installation completes/' opnsense-bootstrap.sh.in
+else
+    sed -i "" "s/reboot/shutdown -r +1/g" opnsense-bootstrap.sh.in
+fi
 
 log "Running OPNsense bootstrap (version: ${OPN_VERSION})..."
 sh ./opnsense-bootstrap.sh.in -y -r "$OPN_VERSION"
@@ -178,5 +189,13 @@ configctl webgui restart renew
 rm /usr/local/etc/rc.syshook.d/start/94-restartwebgui
 EOL
 chmod +x /usr/local/etc/rc.syshook.d/start/94-restartwebgui
+
+if [ "$HA_CONFIG" != "-" ]; then
+    log "Installing Active-Backup agent for ${NODE_ROLE}..."
+    fetch -q -o /tmp/install-opnazure-ha.sh "${OPN_SCRIPT_URI}active-backup/install.sh" || exit 1
+    sh /tmp/install-opnazure-ha.sh "$OPN_SCRIPT_URI" "$HA_CONFIG" || exit 1
+    # Reboot only after all HA files are durable (FreeBSD shutdown -c is NOT cancel).
+    shutdown -r +1
+fi
 
 log "OPNsense provisioning complete. System will reboot in approximately 1 minute."

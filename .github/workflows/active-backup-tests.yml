@@ -1,0 +1,25 @@
+name: Active-Backup validation
+on:
+  pull_request:
+    paths: ['bicep/**', 'ARM/**', 'scripts/**', 'tests/**', '.github/workflows/active-backup-tests.yml']
+  push:
+    branches: ['feature/active-backup-openvpn']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -v
+      - run: sh -n scripts/configureopnsense.sh scripts/active-backup/install.sh
+      - run: az bicep install --version v0.47.16
+      - run: az bicep build --file bicep/main.bicep --outfile /tmp/main.json
+      - name: Generated templates match source
+        run: |
+          cmp ARM/main.json /tmp/main.json
+          cmp ARM/uiFormDefinition.json bicep/uiFormDefinition.json

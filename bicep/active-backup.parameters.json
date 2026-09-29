@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "scenarioOption": { "value": "Active-Backup" },
+    "virtualMachineName": { "value": "opnvpn" },
+    "ManagementSourceCIDR": { "value": "203.0.113.10/32" },
+    "OpnScriptURI": { "value": "https://raw.githubusercontent.com/Galvy/opnazure/feature/active-backup-openvpn/scripts/" },
+    "OpnVersion": { "value": "26.1" },
+    "OpenVpnPort": { "value": 1194 },
+    "HaProbePort": { "value": 8080 },
+    "DeployWindows": { "value": false }
+  }
+}

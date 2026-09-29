@@ -1,7 +1,8 @@
 // Parameters
-@sys.description('Select a valid scenario. Active Active: Two OPNSenses deployed in HA mode using SLB and ILB. Two Nics: Single OPNSense deployed with two Nics.')
+@sys.description('Select a valid scenario. Active Active: Two OPNSenses deployed in HA mode using SLB and ILB. Active Backup: Two nodes with a Blob lease, VM fencing and OpenVPN-aware probes. Two Nics: Single OPNSense deployed with two Nics.')
 @allowed([
   'Active-Active'
+  'Active-Backup'
   'TwoNics'
 ])
 param scenarioOption string = 'TwoNics'
@@ -43,7 +44,7 @@ param existingTrustedSubnetName string = ''
 param PublicIPAddressSku string = 'Standard'
 
 @sys.description('URI for Custom OPN Script and Config')
-param OpnScriptURI string = 'https://raw.githubusercontent.com/dmauser/opnazure/master/scripts/'
+param OpnScriptURI string = 'https://raw.githubusercontent.com/Galvy/opnazure/feature/active-backup-openvpn/scripts/'
 
 @sys.description('Shell Script to be executed')
 param ShellScriptName string = 'configureopnsense.sh'
@@ -72,7 +73,22 @@ param DeployWindowsSubnet string = '10.0.2.0/24'
 
 param Location string = resourceGroup().location
 
+@sys.description('OpenVPN UDP port published by the Active-Backup load balancer.')
+@minValue(1)
+@maxValue(65535)
+param OpenVpnPort int = 1194
+
+@sys.description('Private HTTP probe port for the Active-Backup agent; do not expose publicly.')
+@minValue(1024)
+@maxValue(65535)
+param HaProbePort int = 8080
+
+@sys.description('Administrator public IPv4 CIDR allowed to reach management ports for Active-Backup. Replace the loopback default before deployment.')
+param ManagementSourceCIDR string = '127.0.0.1/32'
+
 // Variables
+var isHa = scenarioOption != 'TwoNics'
+var isActiveBackup = scenarioOption == 'Active-Backup'
 var TempUsername = 'azureuser'
 var TempPassword = guid(subscription().id,resourceGroup().id)
 var untrustedSubnetName = 'Untrusted-Subnet'
@@ -109,7 +125,34 @@ module nsgopnsense 'modules/vnet/nsg.bicep' = {
   params: {
     Location: Location
     nsgName: networkSecurityGroupName
-    securityRules: [
+    securityRules: concat(isActiveBackup ? [
+      {
+        name: 'Allow-HA-Management'
+        properties: {
+          priority: 100
+          sourceAddressPrefix: ManagementSourceCIDR
+          protocol: 'Tcp'
+          destinationPortRanges: ['22', '443']
+          access: 'Allow'
+          direction: 'Inbound'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'Deny-Internet-Management'
+        properties: {
+          priority: 110
+          sourceAddressPrefix: 'Internet'
+          protocol: 'Tcp'
+          destinationPortRanges: ['22', '443']
+          access: 'Deny'
+          direction: 'Inbound'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+        }
+      }
+    ] : [], [
       {
         name: 'In-Any'
         properties: {
@@ -136,7 +179,7 @@ module nsgopnsense 'modules/vnet/nsg.bicep' = {
           destinationAddressPrefix: '*'
         }
       }
-    ]
+    ])
   }
 }
 
@@ -193,7 +236,7 @@ module publicip 'modules/vnet/publicip.bicep' = {
       publicIPAllocationMethod: 'Static'
     }
     publicipsku: {
-      name: PublicIPAddressSku
+      name: isHa ? 'Standard' : PublicIPAddressSku
       tier: 'Regional'
     }
   }
@@ -213,7 +256,7 @@ resource windowsvmsubnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' 
 }
 
 // External Load Balancer
-module elb 'modules/vnet/lb.bicep' = if(scenarioOption == 'Active-Active'){
+module elb 'modules/vnet/lb.bicep' = if(isHa){
   name: externalLoadBalanceName
   params: {
     Location: Location
@@ -235,12 +278,12 @@ module elb 'modules/vnet/lb.bicep' = if(scenarioOption == 'Active-Active'){
     ]
     loadBalancingRules: [
       {
-        name: externalLoadBalancingRuleName
+        name: isActiveBackup ? 'OpenVPN' : externalLoadBalancingRuleName
         properties: {
-          frontendPort: 3389
-          backendPort: 3389
-          enableFloatingIP: true
-          protocol: 'Tcp'
+          frontendPort: isActiveBackup ? OpenVpnPort : 3389
+          backendPort: isActiveBackup ? OpenVpnPort : 3389
+          enableFloatingIP: !isActiveBackup
+          protocol: isActiveBackup ? 'Udp' : 'Tcp'
           frontendIPConfiguration: {
             id: resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', externalLoadBalanceName, externalLoadBalanceFIPConfName)
           }
@@ -287,8 +330,9 @@ module elb 'modules/vnet/lb.bicep' = if(scenarioOption == 'Active-Active'){
       {
         name: externalLoadBalanceProbeName
         properties: {
-          port: 443
-          protocol: 'Tcp'
+          port: isActiveBackup ? HaProbePort : 443
+          protocol: isActiveBackup ? 'Http' : 'Tcp'
+          requestPath: isActiveBackup ? '/health' : null
           intervalInSeconds: 5
           numberOfProbes: 2
         }
@@ -317,7 +361,7 @@ module elb 'modules/vnet/lb.bicep' = if(scenarioOption == 'Active-Active'){
 }
 
 // Internal Load Balancer
-module ilb 'modules/vnet/lb.bicep' = if(scenarioOption == 'Active-Active'){
+module ilb 'modules/vnet/lb.bicep' = if(isHa){
   name: internalLoadBalanceName
   params: {
     Location: Location
@@ -368,8 +412,9 @@ module ilb 'modules/vnet/lb.bicep' = if(scenarioOption == 'Active-Active'){
       {
         name: internalLoadBalanceProbeName
         properties: {
-          port: 443
-          protocol: 'Tcp'
+          port: isActiveBackup ? HaProbePort : 443
+          protocol: isActiveBackup ? 'Http' : 'Tcp'
+          requestPath: isActiveBackup ? '/health' : null
           intervalInSeconds: 5
           numberOfProbes: 2
         }
@@ -385,16 +430,26 @@ module ilb 'modules/vnet/lb.bicep' = if(scenarioOption == 'Active-Active'){
 
 // Create OPNSense Active-Active
 // Create OPNsense Secondary
-module opnSenseSecondary 'modules/VM/opnsense.bicep' = if(scenarioOption == 'Active-Active'){
+module opnSenseSecondary 'modules/VM/opnsense.bicep' = if(isHa){
   name: VMOPNsenseSecondaryName
   params: {
     Location: Location
+    managedIdentityId: isActiveBackup ? witness!.outputs.secondaryIdentity.id : ''
+    availabilitySetId: isActiveBackup ? haAvailabilitySet!.id : ''
     //ShellScriptParameters: '${OpnScriptURI} Secondary ${trustedSubnet.properties.addressPrefix} ${DeployWindows ? windowsvmsubnet.properties.addressPrefix : '1.1.1.1/32'} ${publicip.outputs.publicipAddress}'
     ShellScriptObj: {
       OpnScriptURI: OpnScriptURI
       OpnVersion: OpnVersion
       WALinuxVersion: WALinuxVersion
       OpnType: 'Secondary'
+      HaConfig: isActiveBackup ? base64(string({
+        node: 'Secondary'
+        client_id: witness!.outputs.secondaryIdentity.clientId
+        blob_url: witness!.outputs.blobUrl
+        peer_vm_id: resourceId('Microsoft.Compute/virtualMachines', VMOPNsensePrimaryName)
+        probe_port: HaProbePort
+        openvpn_port: OpenVpnPort
+      })) : ''
       TrustedSubnetName: '${virtualNetworkName}/${useexistingvirtualNetwork ? existingTrustedSubnetName : trustedSubnetName}'
       WindowsSubnetName: DeployWindows ? '${virtualNetworkName}/${useexistingvirtualNetwork ? existingWindowsSubnet : windowsvmsubnetname}' : ''
       publicIPAddress: publicip.outputs.publicipAddress
@@ -410,9 +465,9 @@ module opnSenseSecondary 'modules/VM/opnsense.bicep' = if(scenarioOption == 'Act
     virtualMachineName: VMOPNsenseSecondaryName
     virtualMachineSize: virtualMachineSize
     nsgId: nsgopnsense.outputs.nsgID
-    ExternalLoadBalancerBackendAddressPoolId: scenarioOption == 'Active-Active' ? elb.outputs.backendAddressPools[0].id : ''
-    InternalLoadBalancerBackendAddressPoolId: scenarioOption == 'Active-Active' ? ilb.outputs.backendAddressPools[0].id : ''
-    ExternalloadBalancerInboundNatRulesId: scenarioOption == 'Active-Active' ? elb.outputs.inboundNatRules[1].id : ''
+    ExternalLoadBalancerBackendAddressPoolId: isHa ? elb!.outputs.backendAddressPools[0].id : ''
+    InternalLoadBalancerBackendAddressPoolId: isHa ? ilb!.outputs.backendAddressPools[0].id : ''
+    ExternalloadBalancerInboundNatRulesId: isHa ? elb!.outputs.inboundNatRules[1].id : ''
   }
   dependsOn: [
     vnet
@@ -423,20 +478,30 @@ module opnSenseSecondary 'modules/VM/opnsense.bicep' = if(scenarioOption == 'Act
 }
 
 // Create OPNsense Primary
-module opnSensePrimary 'modules/VM/opnsense.bicep' = if(scenarioOption == 'Active-Active'){
+module opnSensePrimary 'modules/VM/opnsense.bicep' = if(isHa){
   name: VMOPNsensePrimaryName
   params: {
     Location: Location
-    //ShellScriptParameters: '${OpnScriptURI} Primary ${TrustedSubnetCIDR} ${DeployWindows ? windowsvmsubnet.properties.addressPrefix : '1.1.1.1/32'} ${publicip.outputs.publicipAddress} ${opnSenseSecondary.outputs.trustedNicIP}'
+    managedIdentityId: isActiveBackup ? witness!.outputs.primaryIdentity.id : ''
+    availabilitySetId: isActiveBackup ? haAvailabilitySet!.id : ''
+    //ShellScriptParameters: '${OpnScriptURI} Primary ${TrustedSubnetCIDR} ${DeployWindows ? windowsvmsubnet.properties.addressPrefix : '1.1.1.1/32'} ${publicip.outputs.publicipAddress} ${opnSenseSecondary!.outputs.trustedNicIP}'
     ShellScriptObj: {
       OpnScriptURI: OpnScriptURI
       OpnVersion: OpnVersion
       WALinuxVersion: WALinuxVersion
       OpnType: 'Primary'
+      HaConfig: isActiveBackup ? base64(string({
+        node: 'Primary'
+        client_id: witness!.outputs.primaryIdentity.clientId
+        blob_url: witness!.outputs.blobUrl
+        peer_vm_id: resourceId('Microsoft.Compute/virtualMachines', VMOPNsenseSecondaryName)
+        probe_port: HaProbePort
+        openvpn_port: OpenVpnPort
+      })) : ''
       TrustedSubnetName: '${virtualNetworkName}/${useexistingvirtualNetwork ? existingTrustedSubnetName : trustedSubnetName}'
       WindowsSubnetName: DeployWindows ? '${virtualNetworkName}/${useexistingvirtualNetwork ? existingWindowsSubnet : windowsvmsubnetname}' : ''
       publicIPAddress: publicip.outputs.publicipAddress
-      opnSenseSecondarytrustedNicIP: scenarioOption == 'Active-Active' ? opnSenseSecondary.outputs.trustedNicIP : ''
+      opnSenseSecondarytrustedNicIP: isHa ? opnSenseSecondary!.outputs.trustedNicIP : ''
     }
     OPNScriptURI: OpnScriptURI
     ShellScriptName: ShellScriptName
@@ -448,9 +513,9 @@ module opnSensePrimary 'modules/VM/opnsense.bicep' = if(scenarioOption == 'Activ
     virtualMachineName: VMOPNsensePrimaryName
     virtualMachineSize: virtualMachineSize
     nsgId: nsgopnsense.outputs.nsgID
-    ExternalLoadBalancerBackendAddressPoolId: scenarioOption == 'Active-Active' ? elb.outputs.backendAddressPools[0].id : ''
-    InternalLoadBalancerBackendAddressPoolId: scenarioOption == 'Active-Active' ? ilb.outputs.backendAddressPools[0].id : ''
-    ExternalloadBalancerInboundNatRulesId: scenarioOption == 'Active-Active' ? elb.outputs.inboundNatRules[0].id : ''
+    ExternalLoadBalancerBackendAddressPoolId: isHa ? elb!.outputs.backendAddressPools[0].id : ''
+    InternalLoadBalancerBackendAddressPoolId: isHa ? ilb!.outputs.backendAddressPools[0].id : ''
+    ExternalloadBalancerInboundNatRulesId: isHa ? elb!.outputs.inboundNatRules[0].id : ''
   }
   dependsOn: [
     vnet
@@ -542,7 +607,7 @@ module winvmpublicip 'modules/vnet/publicip.bicep' = if (DeployWindows) {
       publicIPAllocationMethod: 'Static'
     }
     publicipsku: {
-      name: PublicIPAddressSku
+      name: isHa ? 'Standard' : PublicIPAddressSku
       tier: 'Regional'
     }
   }
@@ -573,7 +638,7 @@ module winvmroutetableroutes 'modules/vnet/routetableroutes.bicep' = if (DeployW
     routeName: 'default'
     properties: {
       nextHopType: 'VirtualAppliance'
-      nextHopIpAddress: scenarioOption == 'Active-Active' ? ilb.outputs.frontendIP.privateIPAddress : scenarioOption == 'TwoNics' ? opnSenseTwoNics.outputs.trustedNicIP : ''
+      nextHopIpAddress: isHa ? ilb!.outputs.frontendIP.privateIPAddress : scenarioOption == 'TwoNics' ? opnSenseTwoNics!.outputs.trustedNicIP : ''
       addressPrefix: '0.0.0.0/0'
     }
   }
@@ -599,4 +664,44 @@ module winvm 'modules/VM/windows11-vm.bicep' = if (DeployWindows) {
     opnSensePrimary
     opnSenseTwoNics
   ]
+}
+
+// HA witness is deployed before VM bootstrap; peer-scoped permissions follow VM creation.
+module witness 'modules/ha/witness.bicep' = if (isActiveBackup) {
+  name: '${virtualMachineName}-ha-witness'
+  params: {
+    location: Location
+    clusterName: virtualMachineName
+  }
+}
+module primaryFenceAccess 'modules/ha/fence-access.bicep' = if (isActiveBackup) {
+  name: '${virtualMachineName}-primary-fence-access'
+  params: {
+    peerVmName: VMOPNsenseSecondaryName
+    principalId: witness!.outputs.primaryIdentity.principalId
+    roleDefinitionId: witness!.outputs.fenceRoleId
+  }
+  dependsOn: [opnSenseSecondary]
+}
+module secondaryFenceAccess 'modules/ha/fence-access.bicep' = if (isActiveBackup) {
+  name: '${virtualMachineName}-secondary-fence-access'
+  params: {
+    peerVmName: VMOPNsensePrimaryName
+    principalId: witness!.outputs.secondaryIdentity.principalId
+    roleDefinitionId: witness!.outputs.fenceRoleId
+  }
+  dependsOn: [opnSensePrimary]
+}
+output publicIpAddress string = publicip.outputs.publicipAddress
+output internalNextHop string = isHa ? ilb!.outputs.frontendIP.privateIPAddress : opnSenseTwoNics!.outputs.trustedNicIP
+output activeBackupSetup string = isActiveBackup ? 'Configure OpenVPN on both nodes, then follow docs/active-backup.md to arm HA. Probes remain down until armed.' : ''
+
+resource haAvailabilitySet 'Microsoft.Compute/availabilitySets@2023-07-01' = if (isActiveBackup) {
+  name: '${virtualMachineName}-HA'
+  location: Location
+  sku: { name: 'Aligned' }
+  properties: {
+    platformFaultDomainCount: 2
+    platformUpdateDomainCount: 2
+  }
 }
