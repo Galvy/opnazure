@@ -1,182 +1,168 @@
 #!/bin/sh
+# Fresh Azure FreeBSD 15.1 -> OPNsense 26.7. Never use as an in-place upgrade.
+set -eu
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+export PATH
+umask 077
 
-# configureopnsense-v2.sh
-# Improvements over v1:
-#   - Named variables for all positional parameters (readability)
-#   - Input validation with usage message and role check
-#   - Timestamp-based logging via log() helper
-#   - Dynamic Python binary detection (no hardcoded python3.11)
-#   - python3 used for get_nic_gw.py before the symlink exists
-#   - Shared fetch_gw_helper() eliminates duplicated code across branches
-#   - All variables properly quoted to prevent word-splitting
-#   - Heredocs use quoted delimiter ('EOL') to prevent unintended expansion
-#   - Removed stale commented-out dead code
-#   - tar without -v flag to reduce cloud-init log noise
-#   - WebGUI hook written via heredoc instead of fragile echo chains
-#   - Static ARP rc.conf entries written as a single block
+[ "$(id -u)" = 0 ] || { echo 'Must run as root' >&2; exit 1; }
+[ "$(uname -s)" = FreeBSD ] || { echo 'Must run on FreeBSD' >&2; exit 1; }
+[ "$#" = 1 ] || { echo 'Expected base64-encoded JSON settings' >&2; exit 1; }
 
-# ── Parameters ────────────────────────────────────────────────────────────────
-# $1 = OPNScriptURI      Base URI for fetching config/scripts
-# $2 = OpnVersion        OPNsense version to install
-# $3 = WALinuxVersion    WALinuxAgent version to install
-# $4 = Role              VM role: Primary | Secondary | TwoNics
-# $5 = TrustedSubnet     Trusted NIC subnet prefix (for GW resolution)
-# $6 = WindowsVMSubnet   Windows Management VM subnet prefix (for routing)
-# $7 = ELBVip            External Load Balancer VIP (Primary only)
-# $8 = SecondaryIP       Private IP of Secondary OPNsense server (Primary only)
-
-OPN_SCRIPT_URI="$1"
-OPN_VERSION="$2"
-WA_LINUX_VERSION="$3"
-ROLE="$4"
-TRUSTED_SUBNET="${5:-}"
-WINDOWS_VM_SUBNET="${6:-}"
-ELB_VIP="${7:-}"
-SECONDARY_IP="${8:-}"
-
-# ── Logging ───────────────────────────────────────────────────────────────────
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
-
-# ── Input Validation ──────────────────────────────────────────────────────────
-if [ -z "$OPN_SCRIPT_URI" ] || [ -z "$OPN_VERSION" ] || [ -z "$WA_LINUX_VERSION" ] || [ -z "$ROLE" ]; then
-    echo "ERROR: Missing required parameters."
-    echo "Usage: $0 <OPNScriptURI> <OpnVersion> <WALinuxVersion> <Primary|Secondary|TwoNics> <TrustedSubnet> <WindowsVMSubnet> [ELBVip] [SecondaryIP]"
+WORK=/var/db/opnazure
+mkdir -p "$WORK"
+# A retry after conversion must never delete an installed firewall's packages/config.
+if [ -f "$WORK/bootstrap-complete" ]; then
+    echo "Bootstrap already completed. See $WORK/status and /var/log/opnazure-bootstrap.log."
+    exit 0
+fi
+if [ -f "$WORK/conversion-started" ] || [ -f /usr/local/opnsense/version/core ]; then
+    echo "Refusing to re-bootstrap a converted/partially converted VM. Inspect logs; use a fresh test VM." >&2
     exit 1
 fi
-
-case "$ROLE" in
-    Primary|Secondary|TwoNics) ;;
-    *)
-        echo "ERROR: Invalid role '${ROLE}'. Must be Primary, Secondary, or TwoNics."
-        exit 1
-        ;;
+case "$(freebsd-version -u)" in
+    15.1-RELEASE*) ;;
+    *) echo 'Expected a FreeBSD 15.1-RELEASE image' >&2; exit 1 ;;
 esac
-
-# ── Helper: Resolve trusted NIC gateway IP ────────────────────────────────────
-# Uses python3 directly since the python symlink is created later in this script
-fetch_gw_ip() {
-    fetch -q "${OPN_SCRIPT_URI}get_nic_gw.py"
-    PYTHON_BIN=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo "")
-    if [ -z "$PYTHON_BIN" ]; then
-        echo "ERROR: No Python interpreter found to run get_nic_gw.py." >&2
-        exit 1
+[ "$(uname -p)" = amd64 ] || { echo 'Expected amd64' >&2; exit 1; }
+if ! mkdir "$WORK/lock"; then
+    echo 'Another bootstrap is running (or a previous run was interrupted). Inspect the VM.' >&2
+    exit 1
+fi
+STAGE=preflight
+cleanup() {
+    result=$?
+    trap - EXIT
+    if [ "$result" -ne 0 ]; then
+        printf 'failed: %s (exit %s)\n' "$STAGE" "$result" > "$WORK/status"
+        echo "ERROR during $STAGE; no automatic retry or reboot."
     fi
-    "$PYTHON_BIN" get_nic_gw.py "$TRUSTED_SUBNET"
+    rmdir "$WORK/lock"
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+printf 'Provisioning log: /var/log/opnazure-bootstrap.log\n'
+exec >> /var/log/opnazure-bootstrap.log 2>&1
+log() { printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"; }
+stage() { STAGE=$1; printf '%s\n' "$STAGE" > "$WORK/status"; log "$STAGE"; }
+fetch_file() {
+    url=$1
+    target=$2
+    attempt=1
+    while ! fetch -T 60 -o "${target}.download" "$url"; do
+        rm -f "${target}.download"
+        [ "$attempt" -lt 3 ] || return 1
+        attempt=$((attempt + 1))
+        sleep 5
+    done
+    mv "${target}.download" "$target"
 }
 
-# ── Apply OPNsense Configuration XML ─────────────────────────────────────────
-log "Configuring OPNsense role: ${ROLE}"
-
-if [ "$ROLE" = "Primary" ]; then
-    fetch -q "${OPN_SCRIPT_URI}config-active-active-primary.xml"
-    GWIP=$(fetch_gw_ip)
-    sed -i "" "s/yyy.yyy.yyy.yyy/${GWIP}/" config-active-active-primary.xml
-    sed -i "" "s_zzz.zzz.zzz.zzz_${WINDOWS_VM_SUBNET}_" config-active-active-primary.xml
-    sed -i "" "s/www.www.www.www/${ELB_VIP}/" config-active-active-primary.xml
-    sed -i "" "s/xxx.xxx.xxx.xxx/${SECONDARY_IP}/" config-active-active-primary.xml
-    sed -i "" "s/<hostname>OPNsense<\/hostname>/<hostname>OPNsense-Primary<\/hostname>/" config-active-active-primary.xml
-    cp config-active-active-primary.xml /usr/local/etc/config.xml
-
-elif [ "$ROLE" = "Secondary" ]; then
-    fetch -q "${OPN_SCRIPT_URI}config-active-active-secondary.xml"
-    GWIP=$(fetch_gw_ip)
-    sed -i "" "s/yyy.yyy.yyy.yyy/${GWIP}/" config-active-active-secondary.xml
-    sed -i "" "s_zzz.zzz.zzz.zzz_${WINDOWS_VM_SUBNET}_" config-active-active-secondary.xml
-    sed -i "" "s/www.www.www.www/${ELB_VIP}/" config-active-active-secondary.xml
-    sed -i "" "s/<hostname>OPNsense<\/hostname>/<hostname>OPNsense-Secondary<\/hostname>/" config-active-active-secondary.xml
-    cp config-active-active-secondary.xml /usr/local/etc/config.xml
-
-elif [ "$ROLE" = "TwoNics" ]; then
-    fetch -q "${OPN_SCRIPT_URI}config.xml"
-    GWIP=$(fetch_gw_ip)
-    sed -i "" "s/yyy.yyy.yyy.yyy/${GWIP}/" config.xml
-    sed -i "" "s_zzz.zzz.zzz.zzz_${WINDOWS_VM_SUBNET}_" config.xml
-    cp config.xml /usr/local/etc/config.xml
+stage preflight
+PYTHON=
+for candidate in /usr/local/bin/python3 /usr/local/bin/python3.[0-9]*; do
+    if [ -x "$candidate" ] && "$candidate" -c 'import json, ipaddress, xml.etree.ElementTree' 2>/dev/null; then
+        PYTHON=$candidate
+        break
+    fi
+done
+[ -n "$PYTHON" ] || { log 'No usable Python 3 in the Azure image'; exit 1; }
+# Decode without eval/source or interpolating user input into shell code.
+"$PYTHON" -c 'import base64,json,sys; print(json.dumps(json.loads(base64.b64decode(sys.argv[1],validate=True))))' "$1" > "$WORK/settings.json"
+SCRIPT_URI=$("$PYTHON" -c 'import json,re,sys; u=json.load(open(sys.argv[1]))["scriptURI"]; assert re.fullmatch(r"https://[A-Za-z0-9._~:/%+-]+/",u), "Invalid script URI"; print(u)' "$WORK/settings.json")
+for file in config.xml config-active-active-primary.xml config-active-active-secondary.xml get_nic_gw.py prepare_config.py actions_waagent.conf verify_opnsense.sh; do
+    fetch_file "${SCRIPT_URI}${file}" "$WORK/$file"
+done
+BOOTSTRAP_COMMIT=db018c35aac47020c69dc507c3ae67a30dbdf2ab
+fetch_file "https://raw.githubusercontent.com/opnsense/update/${BOOTSTRAP_COMMIT}/src/bootstrap/opnsense-bootstrap.sh.in" "$WORK/bootstrap.upstream.sh"
+"$PYTHON" "$WORK/prepare_config.py" "$WORK"
+sha256 "$WORK/settings.json" "$WORK/config.rendered.xml" "$WORK/prepare_config.py" "$WORK/get_nic_gw.py" "$WORK/bootstrap.upstream.sh" > "$WORK/input-checksums.txt"
+AGENT_MINIMUM=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["agentMinimumVersion"])' "$WORK/settings.json")
+# Record the image selected by Azure if IMDS is available, without querying identities.
+if fetch -T 10 -H 'Metadata: true' -o "$WORK/image-metadata.json" 'http://169.254.169.254/metadata/instance/compute/storageProfile/imageReference?api-version=2021-02-01&format=json'; then
+    log 'Recorded image reference from Azure IMDS'
+else
+    log 'Image metadata unavailable; obtain exactVersion from the Azure VM resource'
 fi
 
-# ── OPNsense Bootstrap ────────────────────────────────────────────────────────
-log "Downloading OPNsense bootstrap script..."
-fetch -q https://raw.githubusercontent.com/opnsense/update/master/src/bootstrap/opnsense-bootstrap.sh.in
+stage conversion
+cp "$WORK/config.rendered.xml" /usr/local/etc/config.xml
+touch "$WORK/conversion-started"
+# The pinned upstream script retains set -e, including its FreeBSD pkgbase handling.
+# Only its final reboot is suppressed and its core source is pinned.
+sh "$WORK/bootstrap.sh" -y -r 26.7
 
-log "Enabling root SSH login..."
-sed -i "" 's/#PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
+stage azure-integration
+# Use the FreeBSD-port package (correct service paths, Python and dependencies).
+pkg install -y azure-agent bash os-frr
+AGENT_VERSION=$(pkg query '%v' azure-agent)
+[ "$(pkg version -t "$AGENT_VERSION" "$AGENT_MINIMUM")" != '<' ] || {
+    log "azure-agent $AGENT_VERSION is older than required $AGENT_MINIMUM"; exit 1;
+}
+# Do not stop/restart the extension's parent agent while provisioning is running.
+# Disable reprovisioning and scratch-disk changes on subsequent OPNsense boots.
+[ -f /usr/local/etc/waagent.conf ] || cp /usr/local/etc/waagent.conf.sample /usr/local/etc/waagent.conf
+for setting in 'ResourceDisk.EnableSwap=n' 'ResourceDisk.Format=n' 'Provisioning.Agent=disabled' 'Provisioning.DeleteRootPassword=n' 'Provisioning.MonitorHostName=n'; do
+    key=${setting%%=*}
+    sed -i '' "/^${key}=/d" /usr/local/etc/waagent.conf
+    printf '%s\n' "$setting" >> /usr/local/etc/waagent.conf
+done
+sysrc waagent_enable=YES
+# A separate late hook starts waagent after the Azure platform route is restored.
+sysrc waagent_skip=YES
+install -m 644 "$WORK/actions_waagent.conf" /usr/local/opnsense/service/conf/actions.d/actions_waagent.conf
+install -m 755 "$WORK/verify_opnsense.sh" /usr/local/sbin/opnazure-verify
 
-# Patch bootstrap:
-#   - Disable set -e because pkg commands (unlock -a, delete -fa) return non-zero
-#   - Delay reboot by 1 minute so the rest of this script can finish
-log "Patching bootstrap script..."
-sed -i "" "s/set -e/#set -e/g" opnsense-bootstrap.sh.in
-sed -i "" "s/reboot/shutdown -r +1/g" opnsense-bootstrap.sh.in
-
-log "Running OPNsense bootstrap (version: ${OPN_VERSION})..."
-sh ./opnsense-bootstrap.sh.in -y -r "$OPN_VERSION"
-
-# ── Azure WALinuxAgent ────────────────────────────────────────────────────────
-log "Installing WALinuxAgent v${WA_LINUX_VERSION}..."
-fetch -q "https://github.com/Azure/WALinuxAgent/archive/refs/tags/v${WA_LINUX_VERSION}.tar.gz"
-tar -xzf "v${WA_LINUX_VERSION}.tar.gz"
-cd "WALinuxAgent-${WA_LINUX_VERSION}/"
-python3 setup.py install --register-service --lnx-distro=freebsd --force
-cd ..
-
-# Create /usr/local/bin/python symlink pointing at the installed python3 binary.
-# Detected dynamically so it remains correct if the python3 minor version changes.
-log "Configuring python symlink for waagent..."
-PYTHON3_BIN=$(ls /usr/local/bin/python3.* 2>/dev/null | grep -v '\.py$' | sort -V | tail -1)
-if [ -n "$PYTHON3_BIN" ] && [ ! -e /usr/local/bin/python ]; then
-    ln -s "$PYTHON3_BIN" /usr/local/bin/python
-    log "Symlink created: /usr/local/bin/python -> ${PYTHON3_BIN}"
-fi
-
-sed -i "" 's/ResourceDisk.EnableSwap=y/ResourceDisk.EnableSwap=n/' /etc/waagent.conf
-
-log "Installing waagent actions configuration..."
-fetch -q "${OPN_SCRIPT_URI}actions_waagent.conf"
-cp actions_waagent.conf /usr/local/opnsense/service/conf/actions.d
-
-# ── Additional Packages ───────────────────────────────────────────────────────
-# bash  : required for Azure Custom Script Extension
-# os-frr: FRRouting for dynamic routing support
-log "Installing additional packages (bash, os-frr)..."
-pkg install -y bash
-pkg install -y os-frr
-
-# ── Azure Route Fix ───────────────────────────────────────────────────────────
-# Delete the 168.63.129.16 host route that Azure injects at boot; OPNsense
-# uses a static ARP entry instead (see below) so the route is not needed and
-# can interfere with traffic.
-log "Adding startup hook to remove spurious Azure route..."
-cat > /usr/local/etc/rc.syshook.d/start/22-remoteroute <<'EOL'
+# Preserve the upstream platform-IP workaround, without modifying vendor hooks.
+# 168.63.129.16 is Azure's wire server/probe IP; IMDS is 169.254.169.254.
+cat > /usr/local/etc/rc.syshook.d/start/21-opnazure-platform <<'HOOK'
 #!/bin/sh
-route delete 168.63.129.16
-EOL
-chmod +x /usr/local/etc/rc.syshook.d/start/22-remoteroute
+set -eu
+# A missing host route is normal on some image/lease combinations.
+route delete -host 168.63.129.16 >/dev/null 2>&1 || :
+arp -s 168.63.129.16 12:34:56:78:9a:bc
+service waagent onestatus >/dev/null 2>&1 || service waagent start
+HOOK
+chmod 755 /usr/local/etc/rc.syshook.d/start/21-opnazure-platform
 
-# ── Azure Load Balancer Probe / Internal VIP ──────────────────────────────────
-# OPNsense must respond to ARP requests for 168.63.129.16 so that:
-#   1. Azure health probes from the load balancer reach the VM
-#   2. Azure platform services (IMDS, waagent) remain reachable
-log "Configuring static ARP entry for Azure Internal VIP (168.63.129.16)..."
+cat > /usr/local/etc/rc.syshook.d/start/95-opnazure-verify <<'HOOK'
+#!/bin/sh
+set -eu
+exec >> /var/log/opnazure-firstboot.log 2>&1
+WORK=/var/db/opnazure
+printf 'verifying-first-boot\n' > "$WORK/status"
+trap 'printf "first-boot-failed\n" > /var/db/opnazure/status' EXIT
+# Retry on a later boot if renewal fails; do not remove the marker prematurely.
+if [ ! -f "$WORK/certificate-renewed" ]; then
+    configctl webgui restart renew
+    touch "$WORK/certificate-renewed"
+fi
+/usr/local/sbin/opnazure-verify
+printf 'ready\n' > "$WORK/status"
+date -u > "$WORK/first-boot-complete"
+trap - EXIT
+HOOK
+chmod 755 /usr/local/etc/rc.syshook.d/start/95-opnazure-verify
+
+stage checking-installed-packages
+OPN_VERSION=$(pkg query '%v' opnsense)
+case "$OPN_VERSION" in 26.7*) ;; *) log "Unexpected OPNsense version: $OPN_VERSION"; exit 1 ;; esac
+[ "$(pkg version -t "$OPN_VERSION" '26.7.4_1')" != '<' ] || {
+    log "OPNsense $OPN_VERSION is older than the minimum 26.7.4_1; check the mirror"; exit 1;
+}
+pkg check -d -a
+/usr/local/sbin/waagent -version
 {
-    echo "# Azure Internal VIP - required for LB health probes and platform services"
-    echo 'static_arp_pairs="azvip"'
-    echo 'static_arp_azvip="168.63.129.16 12:34:56:78:9a:bc"'
-} >> /etc/rc.conf
-
-service static_arp start
-echo 'service static_arp start' >> /usr/local/etc/rc.syshook.d/start/20-freebsd
-
-# ── WebGUI Certificate Renewal ────────────────────────────────────────────────
-# One-time boot hook: renews the self-signed WebGUI certificate after OPNsense
-# first boots, then removes itself so it does not run on subsequent reboots.
-log "Setting up one-time WebGUI certificate renewal hook..."
-cat > /usr/local/etc/rc.syshook.d/start/94-restartwebgui <<'EOL'
-#!/bin/sh
-configctl webgui restart renew
-rm /usr/local/etc/rc.syshook.d/start/94-restartwebgui
-EOL
-chmod +x /usr/local/etc/rc.syshook.d/start/94-restartwebgui
-
-log "OPNsense provisioning complete. System will reboot in approximately 1 minute."
+    printf 'OPNsense=%s\nAzureAgent=%s\nBootstrapCommit=%s\n' "$OPN_VERSION" "$AGENT_VERSION" "$BOOTSTRAP_COMMIT"
+    freebsd-version -u
+    pkg query '%n %v'
+} > "$WORK/installed-versions.txt"
+# Leave time for the extension to report its exit status, AFTER every install/check.
+stage awaiting-reboot
+touch "$WORK/bootstrap-complete"
+if ! shutdown -r +1 'OPNsense bootstrap completed; rebooting into OPNsense'; then
+    rm -f "$WORK/bootstrap-complete"
+    exit 1
+fi
+log 'Bootstrap completed. First-boot checks are still pending; see /var/db/opnazure/status after reboot.'

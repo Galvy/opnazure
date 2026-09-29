@@ -14,7 +14,7 @@
     "virtualNetworkName": {
       "value": "OPN-VNET"
     },
-    "existingvirtualNetwork" :{
+    "existingvirtualNetwork": {
       "value": "new"
     },
     "VNETAddress": {
@@ -38,12 +38,12 @@
       "value": "Standard"
     },
     "OpnScriptURI": {
-      "value": "https://raw.githubusercontent.com/dmauser/opnazure/master/scripts/"
+      "value": "https://raw.githubusercontent.com/Galvy/opnazure/update/freebsd15-opnsense26.7/scripts/"
     },
     "ShellScriptName": {
       "value": "configureopnsense.sh"
     },
-    "DeployWindows" :{
+    "DeployWindows": {
       "value": false
     },
     "DeployWindowsSubnet": {
@@ -56,7 +56,16 @@
       "value": "azureuser"
     },
     "WinPassword": {
-      "value": "P@ssw0rd!1234&Azure"
+      "value": ""
+    },
+    "OpnVersion": {
+      "value": "26.7"
+    },
+    "FreeBSDImageVersion": {
+      "value": "latest"
+    },
+    "managementSourceCIDR": {
+      "value": "203.0.113.10/32"
     }
   }
 }

@@ -1,0 +1,30 @@
+name: OPNsense deployment validation
+on:
+  push:
+    branches: ['update/freebsd15-opnsense26.7']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Bicep CLI
+        run: |
+          curl --fail --location --retry 3 https://github.com/Azure/bicep/releases/download/v0.47.16/bicep-linux-x64 -o "$RUNNER_TEMP/bicep"
+          chmod +x "$RUNNER_TEMP/bicep"
+      - name: Verify generated artifacts
+        run: |
+          "$RUNNER_TEMP/bicep" build bicep/main.bicep --outfile "$RUNNER_TEMP/main.json"
+          cmp ARM/main.json "$RUNNER_TEMP/main.json"
+          cmp bicep/main.parameters.json ARM/main.parameters.json
+          cmp bicep/uiFormDefinition.json ARM/uiFormDefinition.json
+      - name: Check shell scripts and provisioning regressions
+        run: |
+          sh -n scripts/launch-bootstrap.sh
+          sh -n scripts/configureopnsense.sh
+          sh -n scripts/verify_opnsense.sh
+          shellcheck scripts/launch-bootstrap.sh scripts/configureopnsense.sh scripts/verify_opnsense.sh
+          python3 -m unittest discover -s tests -v
