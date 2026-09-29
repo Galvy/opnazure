@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from get_nic_gw import gateway
-from prepare_twonic import BOOTSTRAP_SHA256, CORE_COMMIT, patch_bootstrap, render_config, validate
+from prepare_config import BOOTSTRAP_SHA256, CORE_COMMIT, patch_bootstrap, render_config, validate
 
 BASE = 'https://raw.githubusercontent.com/Galvy/opnazure/update/freebsd15-opnsense26.7/'
 SETTINGS = dict(scriptURI=BASE+'scripts/', opnVersion='26.7', agentMinimumVersion='2.15.0.1',
@@ -100,10 +100,8 @@ class DeploymentTests(unittest.TestCase):
             self.assertEqual((ROOT/'ARM'/name).read_bytes(), (ROOT/'bicep'/name).read_bytes())
 
     def test_only_supported_scenario_and_series(self):
-        self.assertEqual(self.arm['parameters']['scenarioOption']['allowedValues'], ['TwoNics'])
+        self.assertEqual(self.arm['parameters']['scenarioOption']['allowedValues'], ['Active-Active', 'TwoNics'])
         self.assertEqual(self.arm['parameters']['OpnVersion']['allowedValues'], ['26.7'])
-        names={r['name'] for r in self.arm['resources']}
-        self.assertFalse(any('LoadBalance' in n for n in names))
 
     def test_image_reference_and_purchase_plan_match(self):
         nested=next(r['properties']['template'] for r in self.arm['resources'] if r['name']=="[format('{0}-TwoNics', parameters('virtualMachineName'))]")

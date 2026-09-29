@@ -71,13 +71,13 @@ done
 # Decode without eval/source or interpolating user input into shell code.
 "$PYTHON" -c 'import base64,json,sys; print(json.dumps(json.loads(base64.b64decode(sys.argv[1],validate=True))))' "$1" > "$WORK/settings.json"
 SCRIPT_URI=$("$PYTHON" -c 'import json,re,sys; u=json.load(open(sys.argv[1]))["scriptURI"]; assert re.fullmatch(r"https://[A-Za-z0-9._~:/%+-]+/",u), "Invalid script URI"; print(u)' "$WORK/settings.json")
-for file in config.xml get_nic_gw.py prepare_twonic.py actions_waagent.conf verify_twonic.sh; do
+for file in config.xml config-active-active-primary.xml config-active-active-secondary.xml get_nic_gw.py prepare_config.py actions_waagent.conf verify_opnsense.sh; do
     fetch_file "${SCRIPT_URI}${file}" "$WORK/$file"
 done
 BOOTSTRAP_COMMIT=db018c35aac47020c69dc507c3ae67a30dbdf2ab
 fetch_file "https://raw.githubusercontent.com/opnsense/update/${BOOTSTRAP_COMMIT}/src/bootstrap/opnsense-bootstrap.sh.in" "$WORK/bootstrap.upstream.sh"
-"$PYTHON" "$WORK/prepare_twonic.py" "$WORK"
-sha256 "$WORK/settings.json" "$WORK/config.xml" "$WORK/prepare_twonic.py" "$WORK/get_nic_gw.py" "$WORK/bootstrap.upstream.sh" > "$WORK/input-checksums.txt"
+"$PYTHON" "$WORK/prepare_config.py" "$WORK"
+sha256 "$WORK/settings.json" "$WORK/config.rendered.xml" "$WORK/prepare_config.py" "$WORK/get_nic_gw.py" "$WORK/bootstrap.upstream.sh" > "$WORK/input-checksums.txt"
 AGENT_MINIMUM=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["agentMinimumVersion"])' "$WORK/settings.json")
 # Record the image selected by Azure if IMDS is available, without querying identities.
 if fetch -T 10 -H 'Metadata: true' -o "$WORK/image-metadata.json" 'http://169.254.169.254/metadata/instance/compute/storageProfile/imageReference?api-version=2021-02-01&format=json'; then
@@ -112,7 +112,7 @@ sysrc waagent_enable=YES
 # A separate late hook starts waagent after the Azure platform route is restored.
 sysrc waagent_skip=YES
 install -m 644 "$WORK/actions_waagent.conf" /usr/local/opnsense/service/conf/actions.d/actions_waagent.conf
-install -m 755 "$WORK/verify_twonic.sh" /usr/local/sbin/opnazure-verify
+install -m 755 "$WORK/verify_opnsense.sh" /usr/local/sbin/opnazure-verify
 
 # Preserve the upstream platform-IP workaround, without modifying vendor hooks.
 # 168.63.129.16 is Azure's wire server/probe IP; IMDS is 169.254.169.254.

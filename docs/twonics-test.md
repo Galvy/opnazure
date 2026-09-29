@@ -3,9 +3,10 @@
 ## Scope and known limits
 
 Use the button in the **test branch README**, a fresh Resource Group and a new VM.
-The template does not upgrade existing firewalls. The first test should use `TwoNics`,
-a new VNet and `DeployWindows=false`. Active-active/active-backup and OpenVPN server
-configuration are outside this branch.
+The template does not upgrade existing firewalls. The first single-node test should use `TwoNics`,
+a new VNet and `DeployWindows=false`. For the two-node scenario, see the
+[Active-Active guide](active-active-test.md). Active-backup and OpenVPN server configuration
+are outside this branch.
 
 The image identity is:
 

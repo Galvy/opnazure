@@ -1,13 +1,15 @@
-# OPNsense 26.7 on Azure — TwoNics test branch
+# OPNsense 26.7 on Azure — TwoNics and Active-Active
 
 This branch of [Galvy/opnazure](https://github.com/Galvy/opnazure/tree/update/freebsd15-opnsense26.7)
 prepares a fresh **FreeBSD 15.1 AMD64 Gen2 ZFS VM → latest OPNsense 26.7 maintenance release**.
 It is based on [dmauser/opnazure](https://github.com/dmauser/opnazure).
 
 **Status: prepared for an Azure test; no real Azure deployment has been performed for this change.**
-Local checks cover template compilation, artifact consistency, configuration preparation and
+Local checks cover template compilation, artifact consistency, configuration preparation, active-active LB/peer wiring and
 bootstrap failure/reboot behaviour with mocked FreeBSD commands. They do not prove Azure runtime compatibility.
-This branch supports **TwoNics only**. It does not implement HA or configure an OpenVPN server.
+Choose **TwoNics** (one VM) or **Active-Active** (two VMs with Azure Standard load balancers).
+The active-active architecture follows the original project, with reciprocal unicast pfsync peers.
+It is not active-backup, and it does not configure an OpenVPN server or replicate OpenVPN sessions.
 
 ## Deploy this fork and branch
 
@@ -25,15 +27,35 @@ https://raw.githubusercontent.com/Galvy/opnazure/update/freebsd15-opnsense26.7/s
 2. Use a **new test Resource Group**, preferably with a new VNet, and leave **Deploy Windows** unchecked for the first test.
 3. Enter **your public IPv4 CIDR** (for example your address followed by `/32`) in the management field.
    The NSG limits inbound SSH/HTTPS to that source. The sample `203.0.113.10/32` is a documentation address; replace it.
-4. Keep OPNsense series **26.7**, image revision **latest**, bootstrap filename and fork script URL at their defaults.
+4. Choose **TwoNics** or **Active-Active**, then keep OPNsense series **26.7**, image revision **latest**, bootstrap filename and fork script URL at their defaults.
 5. Select an available x64 VM size supporting two NICs. The default is `Standard_B2s` (4 GiB); a larger size can help the first test.
 6. Review Marketplace terms and the cost estimate, then deploy when ready.
-7. Wait for the extension **and the subsequent reboot**, then visit `https://<public-IP>`.
+7. Wait for the extension **and the subsequent reboot** (both nodes for active-active).
+   TwoNics: `https://<public-IP>`. Active-active: `https://<public-IP>:50443` (Primary) and `:50444` (Secondary).
    Initial credentials are inherited from upstream: **root / opnsense**. Change the password on first login.
-8. Follow the [test and troubleshooting guide](docs/twonics-test.md) before considering the deployment successful.
+8. Follow the [TwoNics test guide](docs/twonics-test.md) or [Active-Active test guide](docs/active-active-test.md) before considering the deployment successful.
+   For active-active, change the password on both nodes and update the Primary's HA synchronization credentials.
 
 Opening the button does not deploy anything until you submit the Azure wizard. No GitHub `AZURE_CREDENTIALS`
 secret is needed for a portal deployment; Azure uses your signed-in account.
+
+## Deployment scenarios
+
+| Scenario | VMs | Public access | Route-table next hop |
+|---|---|---|---|
+| TwoNics | One, WAN + LAN | Public IP on WAN; HTTPS 443 | VM's trusted NIC IP |
+| Active-Active | Two, each WAN + LAN; shared availability set | Public Standard LB; management NAT 50443/50444 → 443 | Internal Standard LB frontend IP |
+
+Active-active restores the original public TCP 3389 floating-IP example rule, the explicit
+outbound SNAT rule, internal HA-ports rule and TCP 443 probes. The example inbound service
+still needs OPNsense NAT/firewall configuration; it is not an OpenVPN listener. NSG access
+for TCP 3389 is limited to the supplied management CIDR. Other published services need
+matching LB, NSG and OPNsense rules.
+
+Both firewalls have distinct NIC IPs. The external LB public /32 is an OPNsense WAN IP alias
+on both nodes for floating-IP rules. Configuration sync goes Primary → Secondary;
+pfsync uses the opposite trusted NIC address on **both** nodes. No CARP election is used.
+See the active-active guide for health-probe limitations and failure tests.
 
 ## Image and bootstrap changes
 
@@ -69,11 +91,11 @@ bicep build bicep/main.bicep --outfile ARM/main.json
 cp bicep/main.parameters.json ARM/main.parameters.json
 cp bicep/uiFormDefinition.json ARM/uiFormDefinition.json
 sh -n scripts/configureopnsense.sh
-sh -n scripts/verify_twonic.sh
+sh -n scripts/verify_opnsense.sh
 python3 -m unittest discover -s tests -v
 ```
 
-The TwoNics validation workflow runs only local checks and does not authenticate to Azure or deploy resources.
+The OPNsense deployment validation workflow runs only local checks and does not authenticate to Azure or deploy resources.
 The inherited deployment-checker workflows are legacy, manual-only workflows and are not the supported test path
 for this branch; use the portal button and guide above.
 

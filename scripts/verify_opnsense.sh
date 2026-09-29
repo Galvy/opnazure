@@ -29,4 +29,4 @@ sockstat -4 -l | awk '$6 ~ /:443$/ { found=1 } END { exit !found }'
 pfctl -s info | grep -q 'Status: Enabled'
 opnsense-version -a
 freebsd-version -kru
-printf 'Local TwoNics checks passed. Verify HTTPS and routed client traffic externally.\n'
+printf 'Local OPNsense checks passed. Verify HTTPS and routed client traffic externally.\n'

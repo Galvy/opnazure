@@ -1,4 +1,4 @@
-name: TwoNics validation
+name: OPNsense deployment validation
 on:
   push:
     branches: ['update/freebsd15-opnsense26.7']
@@ -24,6 +24,6 @@ jobs:
       - name: Check shell scripts and provisioning regressions
         run: |
           sh -n scripts/configureopnsense.sh
-          sh -n scripts/verify_twonic.sh
-          shellcheck scripts/configureopnsense.sh scripts/verify_twonic.sh
+          sh -n scripts/verify_opnsense.sh
+          shellcheck scripts/configureopnsense.sh scripts/verify_opnsense.sh
           python3 -m unittest discover -s tests -v

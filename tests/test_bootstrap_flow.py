@@ -46,7 +46,7 @@ else: raise RuntimeError(name)
 
 
 class FlowTests(unittest.TestCase):
-    def run_flow(self, fail=None, repeat=False):
+    def run_flow(self, fail=None, repeat=False, role="TwoNics"):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             fakeusr=root/'usr/local'
@@ -65,7 +65,7 @@ class FlowTests(unittest.TestCase):
             # Test retries without a real 10 second wait.
             text=text.replace('sleep 5','true')
             script=root/'run.sh'; script.write_text(text)
-            settings=dict(scriptURI='https://example.test/scripts/', opnVersion='26.7', agentMinimumVersion='2.15.0.1',role='TwoNics', trustedSubnet='10.0.1.0/24',windowsSubnet='')
+            settings=dict(scriptURI='https://example.test/scripts/', opnVersion='26.7', agentMinimumVersion='2.15.0.1',role=role, trustedSubnet='10.0.1.0/24',windowsSubnet='', publicIPAddress='203.0.113.10', localTrustedIP='10.0.1.4', peerTrustedIP='10.0.1.5')
             encoded=base64.b64encode(json.dumps(settings).encode()).decode()
             env=dict(os.environ, FAKE_ROOT=str(root),TEST_REPO=str(ROOT),FAIL_COMMAND=fail or '')
             result=subprocess.run(['/bin/sh',str(script),encoded],env=env,capture_output=True,text=True)
@@ -106,6 +106,14 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(result.returncode,0,log)
         self.assertNotIn('sh ',events)
         self.assertNotIn('shutdown ',events)
+
+    def test_both_active_active_roles_complete_bootstrap(self):
+        for role in ('Primary', 'Secondary'):
+            with self.subTest(role=role):
+                result,events,status,log=self.run_flow(role=role)
+                self.assertEqual(result.returncode,0,log+result.stderr)
+                self.assertEqual(status.strip(),'awaiting-reboot')
+                self.assertGreater(events.index('shutdown '),events.index('pkg check '))
 
     def test_shutdown_failure_is_reported(self):
         result,events,status,log=self.run_flow('shutdown')

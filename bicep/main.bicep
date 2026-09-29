@@ -1,6 +1,7 @@
 // Parameters
-@sys.description('This test branch supports one OPNsense VM with two NICs.')
+@sys.description('TwoNics: one firewall. Active-Active: two firewalls behind public/internal Azure load balancers.')
 @allowed([
+  'Active-Active'
   'TwoNics'
 ])
 param scenarioOption string = 'TwoNics'
@@ -109,11 +110,24 @@ module nsgopnsense 'modules/vnet/nsg.bicep' = {
           priority: 4096
           sourceAddressPrefix: managementSourceCIDR
           protocol: 'Tcp'
-          destinationPortRanges: ['22', '443']
+          destinationPortRanges: scenarioOption == 'Active-Active' ? ['22', '443', '3389'] : ['22', '443']
           access: 'Allow'
           direction: 'Inbound'
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
+        }
+      }
+      {
+        name: 'Azure-Health-Probe'
+        properties: {
+          priority: 4095
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+          protocol: 'Tcp'
+          access: 'Allow'
+          direction: 'Inbound'
         }
       }
       {
@@ -205,6 +219,31 @@ resource windowsvmsubnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' 
   name: '${virtualNetworkName}/${useexistingvirtualNetwork ? existingWindowsSubnet : windowsvmsubnetname}'
 }
 
+// Active-active nodes share load-balancer frontends, not NIC addresses.
+module opnSenseActiveActive 'modules/active-active.bicep' = if (scenarioOption == 'Active-Active') {
+  name: '${virtualMachineName}-ActiveActive'
+  params: {
+    Location: Location
+    virtualMachineName: virtualMachineName
+    virtualMachineSize: virtualMachineSize
+    untrustedSubnetId: untrustedSubnet.id
+    trustedSubnetId: trustedSubnet.id
+    trustedSubnetName: '${virtualNetworkName}/${useexistingvirtualNetwork ? existingTrustedSubnetName : trustedSubnetName}'
+    windowsSubnetName: DeployWindows ? '${virtualNetworkName}/${useexistingvirtualNetwork ? existingWindowsSubnet : windowsvmsubnetname}' : ''
+    publicIPId: publicip.outputs.publicipId
+    publicIPAddress: publicip.outputs.publicipAddress
+    nsgId: nsgopnsense.outputs.nsgID
+    TempUsername: TempUsername
+    TempPassword: TempPassword
+    FreeBSDImageVersion: FreeBSDImageVersion
+    OpnScriptURI: OpnScriptURI
+    OpnVersion: OpnVersion
+    WALinuxVersion: WALinuxVersion
+    ShellScriptName: ShellScriptName
+  }
+  dependsOn: [vnet]
+}
+
 // Create OPNsense TwoNics
 module opnSenseTwoNics 'modules/VM/opnsense.bicep' = if(scenarioOption == 'TwoNics'){
   name: '${virtualMachineName}-TwoNics'
@@ -274,6 +313,7 @@ module nsgwinvm 'modules/vnet/nsg.bicep' = if (DeployWindows) {
   }
   dependsOn: [
     opnSenseTwoNics
+    opnSenseActiveActive
   ]
 }
 
@@ -292,6 +332,7 @@ module winvmpublicip 'modules/vnet/publicip.bicep' = if (DeployWindows) {
   }
   dependsOn: [
     opnSenseTwoNics
+    opnSenseActiveActive
   ]
 }
 
@@ -303,6 +344,7 @@ module winvmroutetable 'modules/vnet/routetable.bicep' = if (DeployWindows) {
   }
   dependsOn: [
     opnSenseTwoNics
+    opnSenseActiveActive
   ]
 }
 
@@ -313,7 +355,7 @@ module winvmroutetableroutes 'modules/vnet/routetableroutes.bicep' = if (DeployW
     routeName: 'default'
     properties: {
       nextHopType: 'VirtualAppliance'
-      nextHopIpAddress: opnSenseTwoNics.outputs.trustedNicIP
+      nextHopIpAddress: scenarioOption == 'Active-Active' ? opnSenseActiveActive!.outputs.internalLoadBalancerIP : opnSenseTwoNics!.outputs.trustedNicIP
       addressPrefix: '0.0.0.0/0'
     }
   }
@@ -336,9 +378,14 @@ module winvm 'modules/VM/windows11-vm.bicep' = if (DeployWindows) {
   }
   dependsOn: [
     opnSenseTwoNics
+    opnSenseActiveActive
   ]
 }
 
 output publicIPAddress string = publicip.outputs.publicipAddress
-output managementURL string = 'https://${publicip.outputs.publicipAddress}'
-output trustedIPAddress string = opnSenseTwoNics.outputs.trustedNicIP
+output managementURL string = scenarioOption == 'Active-Active' ? 'https://${publicip.outputs.publicipAddress}:50443' : 'https://${publicip.outputs.publicipAddress}'
+output secondaryManagementURL string = scenarioOption == 'Active-Active' ? 'https://${publicip.outputs.publicipAddress}:50444' : ''
+// Route-table next hop: the internal LB frontend for active-active.
+output trustedIPAddress string = scenarioOption == 'Active-Active' ? opnSenseActiveActive!.outputs.internalLoadBalancerIP : opnSenseTwoNics!.outputs.trustedNicIP
+output primaryTrustedIPAddress string = scenarioOption == 'Active-Active' ? opnSenseActiveActive!.outputs.primaryTrustedIP : opnSenseTwoNics!.outputs.trustedNicIP
+output secondaryTrustedIPAddress string = scenarioOption == 'Active-Active' ? opnSenseActiveActive!.outputs.secondaryTrustedIP : ''

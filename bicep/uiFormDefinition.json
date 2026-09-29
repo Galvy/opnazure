@@ -3,7 +3,7 @@
   "view": {
     "kind": "Form",
     "properties": {
-      "title": "Galvy \u2014 TwoNics / FreeBSD 15.1 / OPNsense 26.7 test",
+      "title": "Galvy \u2014 OPNsense 26.7 / FreeBSD 15.1",
       "steps": [
         {
           "name": "OPNSenseScenario",
@@ -35,19 +35,24 @@
               "label": "OPNSense Scenario",
               "placeholder": "",
               "defaultValue": "TwoNics",
-              "toolTip": "Single OPNsense VM with two NICs. Test branch.",
+              "toolTip": "Choose a single firewall or two active-active firewalls.",
               "multiselect": false,
               "selectAll": false,
               "filter": false,
               "filterPlaceholder": "",
               "multiLine": true,
-              "defaultDescription": "Single OPNsense VM with two NICs. Test branch.",
+              "defaultDescription": "Choose a single firewall or two active-active firewalls.",
               "constraints": {
                 "allowedValues": [
                   {
                     "label": "TwoNics",
                     "description": "Single OPNSense Deployment with 2 Nics in a Trusted and Untrusted Subnets.",
                     "value": "TwoNics"
+                  },
+                  {
+                    "label": "Active-Active",
+                    "value": "Active-Active",
+                    "description": "Two OPNsense nodes behind public and internal Azure Standard load balancers."
                   }
                 ],
                 "required": true
@@ -64,7 +69,7 @@
               "name": "vmName",
               "type": "Microsoft.Common.TextBox",
               "label": "Virtual Machine name",
-              "toolTip": "Name of the single OPNsense virtual machine.",
+              "toolTip": "VM name; active-active appends -Primary and -Secondary.",
               "defaultValue": "OPNsense",
               "constraints": {
                 "required": true,
@@ -83,7 +88,7 @@
                 "allowedSizes": []
               },
               "osPlatform": "Linux",
-              "count": "1",
+              "count": "[if(equals(steps('OPNSenseScenario').scenarioOption,'Active-Active'),2,1)]",
               "scope": {
                 "subscriptionId": "[steps('OPNSenseScenario').resourceScope.subscription.subscriptionId]",
                 "location": "[steps('OPNSenseScenario').resourceScope.location.name]"

@@ -1,6 +1,8 @@
 param untrustedSubnetId string
 param trustedSubnetId string
-param publicIPId string
+param publicIPId string = ''
+param providedNics object = {}
+param availabilitySetId string = ''
 param virtualMachineName string
 param TempUsername string
 @secure()
@@ -19,7 +21,7 @@ resource windowsvmsubnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' 
   name: ShellScriptObj.WindowsSubnetName
 }
 
-module untrustedNic '../vnet/nic.bicep' = {
+module untrustedNic '../vnet/nic.bicep' = if (empty(providedNics)) {
   name: '${virtualMachineName}-Untrusted-NIC'
   params: {
     Location: Location
@@ -30,7 +32,7 @@ module untrustedNic '../vnet/nic.bicep' = {
     nsgId: nsgId
   }
 }
-module trustedNic '../vnet/nic.bicep' = {
+module trustedNic '../vnet/nic.bicep' = if (empty(providedNics)) {
   name: '${virtualMachineName}-Trusted-NIC'
   params: {
     Location: Location
@@ -54,6 +56,7 @@ resource OPNsense 'Microsoft.Compute/virtualMachines@2023-07-01' = {
       adminUsername: TempUsername
       adminPassword: TempPassword
     }
+    availabilitySet: empty(availabilitySetId) ? null : { id: availabilitySetId }
     hardwareProfile: { vmSize: virtualMachineSize }
     storageProfile: {
       osDisk: { createOption: 'FromImage' }
@@ -67,8 +70,8 @@ resource OPNsense 'Microsoft.Compute/virtualMachines@2023-07-01' = {
     diagnosticsProfile: { bootDiagnostics: { enabled: true } }
     networkProfile: {
       networkInterfaces: [
-        { id: untrustedNic.outputs.nicId, properties: { primary: true } }
-        { id: trustedNic.outputs.nicId, properties: { primary: false } }
+        { id: empty(providedNics) ? untrustedNic!.outputs.nicId : providedNics.wanId, properties: { primary: true } }
+        { id: empty(providedNics) ? trustedNic!.outputs.nicId : providedNics.lanId, properties: { primary: false } }
       ]
     }
   }
@@ -82,7 +85,10 @@ var bootstrapSettings = {
   scriptURI: ShellScriptObj.OpnScriptURI
   opnVersion: ShellScriptObj.OpnVersion
   agentMinimumVersion: ShellScriptObj.WALinuxVersion
-  role: 'TwoNics'
+  role: ShellScriptObj.OpnType
+  publicIPAddress: ShellScriptObj.publicIPAddress
+  localTrustedIP: ShellScriptObj.?localTrustedIP ?? ''
+  peerTrustedIP: ShellScriptObj.?peerTrustedIP ?? ''
   trustedSubnet: trustedPrefix
   windowsSubnet: windowsPrefix
 }
@@ -101,5 +107,5 @@ resource vmext 'Microsoft.Compute/virtualMachines/extensions@2023-07-01' = {
     }
   }
 }
-output untrustedNicIP string = untrustedNic.outputs.nicIP
-output trustedNicIP string = trustedNic.outputs.nicIP
+output untrustedNicIP string = empty(providedNics) ? untrustedNic!.outputs.nicIP : providedNics.wanIP
+output trustedNicIP string = empty(providedNics) ? trustedNic!.outputs.nicIP : providedNics.lanIP
