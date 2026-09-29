@@ -92,6 +92,10 @@ var bootstrapSettings = {
   trustedSubnet: trustedPrefix
   windowsSubnet: windowsPrefix
 }
+// Avoid the 1.5 handler's Python rU/dos2unix preprocessing on Python >= 3.11.
+// The launcher is compiled into ARM and uses FreeBSD fetch; no Python patching.
+// It contains no single quotes, so it is safe inside the quoted sh -c argument.
+var bootstrapLauncher = loadTextContent('../../../scripts/launch-bootstrap.sh')
 resource vmext 'Microsoft.Compute/virtualMachines/extensions@2023-07-01' = {
   parent: OPNsense
   name: 'CustomScript'
@@ -102,8 +106,8 @@ resource vmext 'Microsoft.Compute/virtualMachines/extensions@2023-07-01' = {
     typeHandlerVersion: '1.5'
     autoUpgradeMinorVersion: false
     settings: {
-      fileUris: [ '${ShellScriptObj.OpnScriptURI}${ShellScriptName}' ]
-      commandToExecute: 'sh configureopnsense.sh ${base64(string(bootstrapSettings))}'
+      fileUris: []
+      commandToExecute: '/bin/sh -c \'${bootstrapLauncher}\' opnazure ${base64(string(bootstrapSettings))} ${base64('${ShellScriptObj.OpnScriptURI}${ShellScriptName}')}'
     }
   }
 }

@@ -23,7 +23,8 @@ jobs:
           cmp bicep/uiFormDefinition.json ARM/uiFormDefinition.json
       - name: Check shell scripts and provisioning regressions
         run: |
+          sh -n scripts/launch-bootstrap.sh
           sh -n scripts/configureopnsense.sh
           sh -n scripts/verify_opnsense.sh
-          shellcheck scripts/configureopnsense.sh scripts/verify_opnsense.sh
+          shellcheck scripts/launch-bootstrap.sh scripts/configureopnsense.sh scripts/verify_opnsense.sh
           python3 -m unittest discover -s tests -v

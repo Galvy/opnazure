@@ -4,7 +4,8 @@ This branch of [Galvy/opnazure](https://github.com/Galvy/opnazure/tree/update/fr
 prepares a fresh **FreeBSD 15.1 AMD64 Gen2 ZFS VM → latest OPNsense 26.7 maintenance release**.
 It is based on [dmauser/opnazure](https://github.com/dmauser/opnazure).
 
-**Status: prepared for an Azure test; no real Azure deployment has been performed for this change.**
+**Status: an initial TwoNics Azure test failed in CustomScriptForLinux preprocessing before the bootstrap ran.**
+The inline-launcher correction is covered by offline regression tests; a new Azure test is still required.
 Local checks cover template compilation, artifact consistency, configuration preparation, active-active LB/peer wiring and
 bootstrap failure/reboot behaviour with mocked FreeBSD commands. They do not prove Azure runtime compatibility.
 Choose **TwoNics** (one VM) or **Active-Active** (two VMs with Azure Standard load balancers).
@@ -62,6 +63,8 @@ See the active-active guide for health-probe limitations and failure tests.
 - Marketplace identity: `freebsd:freebsd-15_1:15_1-release-amd64-gen2-zfs:<revision>`.
   Publisher and SKU were checked against the public Marketplace catalog; regional/subscription availability still needs Azure validation.
 - Bicep compiles to the committed `ARM/main.json`; both UI copies and parameter files are kept in sync.
+- The extension runs an embedded shell launcher with `fileUris: []`; FreeBSD `fetch` downloads the entry point.
+  This avoids the old handler's Python `rU`/DOS-to-Unix preprocessing failure on Python 3.11 and newer.
 - The official bootstrap is pinned to a commit and verified with SHA-256. Its `set -e` and FreeBSD pkgbase handling remain enabled.
   Its core-source archive is also pinned. Only the final reboot is suppressed, until Azure integration is installed.
 - Azure Agent comes from OPNsense's `azure-agent` package, with its FreeBSD service paths and Python dependencies.
@@ -90,10 +93,14 @@ Use Bicep CLI **0.47.16**:
 bicep build bicep/main.bicep --outfile ARM/main.json
 cp bicep/main.parameters.json ARM/main.parameters.json
 cp bicep/uiFormDefinition.json ARM/uiFormDefinition.json
+sh -n scripts/launch-bootstrap.sh
 sh -n scripts/configureopnsense.sh
 sh -n scripts/verify_opnsense.sh
 python3 -m unittest discover -s tests -v
 ```
+
+Regression tests also reproduce the legacy handler's `rU` failure and exercise the ARM-embedded launcher
+with mocked downloads, including failed/empty downloads and bootstrap exit-code propagation.
 
 The OPNsense deployment validation workflow runs only local checks and does not authenticate to Azure or deploy resources.
 The inherited deployment-checker workflows are legacy, manual-only workflows and are not the supported test path

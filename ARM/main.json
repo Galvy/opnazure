@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.47.16.16243",
-      "templateHash": "17827988695672232531"
+      "templateHash": "1793706792931907158"
     }
   },
   "parameters": {
@@ -526,7 +526,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "17666771890987839807"
+              "templateHash": "7110818129539213872"
             }
           },
           "parameters": {
@@ -1302,7 +1302,7 @@
                     "_generator": {
                       "name": "bicep",
                       "version": "0.47.16.16243",
-                      "templateHash": "1637820994512864549"
+                      "templateHash": "6319273178207113618"
                     }
                   },
                   "parameters": {
@@ -1357,7 +1357,8 @@
                   "variables": {
                     "imagePublisher": "freebsd",
                     "imageOffer": "freebsd-15_1",
-                    "imageSku": "15_1-release-amd64-gen2-zfs"
+                    "imageSku": "15_1-release-amd64-gen2-zfs",
+                    "bootstrapLauncher": "#!/bin/sh\n# Embedded in commandToExecute by Bicep; not downloaded through fileUris.\n# CustomScriptForLinux 1.5 uses obsolete Python rU mode to preprocess .sh files.\n# All values arrive as base64 arguments; never interpolate a URL into shell code.\nset -eu\numask 077\n[ \"$#\" = 2 ] || { echo \"Expected settings and script URL as base64 arguments\" >&2; exit 1; }\nscript_uri=$(printf %s \"$2\" | /usr/bin/base64 -d)\ncase \"$script_uri\" in\n    https://*) ;;\n    *) echo \"Bootstrap URL must use HTTPS\" >&2; exit 1 ;;\nesac\nwork=$(mktemp -d /var/tmp/opnazure-launch.XXXXXX)\ncleanup() { rm -rf -- \"$work\"; }\ntrap cleanup EXIT\ntrap \"exit 1\" HUP INT TERM\nattempt=1\nwhile ! fetch -T 60 -o \"$work/configureopnsense.sh.download\" \"$script_uri\"; do\n    rm -f \"$work/configureopnsense.sh.download\"\n    [ \"$attempt\" -lt 3 ] || { echo \"Bootstrap download failed after 3 attempts\" >&2; exit 1; }\n    attempt=$((attempt + 1))\n    sleep 5\ndone\n[ -s \"$work/configureopnsense.sh.download\" ] || { echo \"Bootstrap download is empty\" >&2; exit 1; }\nmv \"$work/configureopnsense.sh.download\" \"$work/configureopnsense.sh\"\n# Keep this process alive so its exit status reports bootstrap success/failure.\n/bin/sh \"$work/configureopnsense.sh\" \"$1\"\n"
                   },
                   "resources": [
                     {
@@ -1429,10 +1430,8 @@
                         "typeHandlerVersion": "1.5",
                         "autoUpgradeMinorVersion": false,
                         "settings": {
-                          "fileUris": [
-                            "[format('{0}{1}', parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptName'))]"
-                          ],
-                          "commandToExecute": "[format('sh configureopnsense.sh {0}', base64(string(createObject('scriptURI', parameters('ShellScriptObj').OpnScriptURI, 'opnVersion', parameters('ShellScriptObj').OpnVersion, 'agentMinimumVersion', parameters('ShellScriptObj').WALinuxVersion, 'role', parameters('ShellScriptObj').OpnType, 'publicIPAddress', parameters('ShellScriptObj').publicIPAddress, 'localTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'localTrustedIP'), ''), 'peerTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'peerTrustedIP'), ''), 'trustedSubnet', if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), 'windowsSubnet', if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '')))))]"
+                          "fileUris": [],
+                          "commandToExecute": "[format('/bin/sh -c ''{0}'' opnazure {1} {2}', variables('bootstrapLauncher'), base64(string(createObject('scriptURI', parameters('ShellScriptObj').OpnScriptURI, 'opnVersion', parameters('ShellScriptObj').OpnVersion, 'agentMinimumVersion', parameters('ShellScriptObj').WALinuxVersion, 'role', parameters('ShellScriptObj').OpnType, 'publicIPAddress', parameters('ShellScriptObj').publicIPAddress, 'localTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'localTrustedIP'), ''), 'peerTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'peerTrustedIP'), ''), 'trustedSubnet', if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), 'windowsSubnet', if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '')))), base64(format('{0}{1}', parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptName'))))]"
                         }
                       },
                       "dependsOn": [
@@ -1693,8 +1692,8 @@
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Compute/availabilitySets', format('{0}-AvailabilitySet', parameters('virtualMachineName')))]",
-                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
                 "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[sub(1, copyIndex())]))]",
+                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
                 "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
                 "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
                 "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Untrusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
@@ -1788,7 +1787,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.47.16.16243",
-              "templateHash": "1637820994512864549"
+              "templateHash": "6319273178207113618"
             }
           },
           "parameters": {
@@ -1843,7 +1842,8 @@
           "variables": {
             "imagePublisher": "freebsd",
             "imageOffer": "freebsd-15_1",
-            "imageSku": "15_1-release-amd64-gen2-zfs"
+            "imageSku": "15_1-release-amd64-gen2-zfs",
+            "bootstrapLauncher": "#!/bin/sh\n# Embedded in commandToExecute by Bicep; not downloaded through fileUris.\n# CustomScriptForLinux 1.5 uses obsolete Python rU mode to preprocess .sh files.\n# All values arrive as base64 arguments; never interpolate a URL into shell code.\nset -eu\numask 077\n[ \"$#\" = 2 ] || { echo \"Expected settings and script URL as base64 arguments\" >&2; exit 1; }\nscript_uri=$(printf %s \"$2\" | /usr/bin/base64 -d)\ncase \"$script_uri\" in\n    https://*) ;;\n    *) echo \"Bootstrap URL must use HTTPS\" >&2; exit 1 ;;\nesac\nwork=$(mktemp -d /var/tmp/opnazure-launch.XXXXXX)\ncleanup() { rm -rf -- \"$work\"; }\ntrap cleanup EXIT\ntrap \"exit 1\" HUP INT TERM\nattempt=1\nwhile ! fetch -T 60 -o \"$work/configureopnsense.sh.download\" \"$script_uri\"; do\n    rm -f \"$work/configureopnsense.sh.download\"\n    [ \"$attempt\" -lt 3 ] || { echo \"Bootstrap download failed after 3 attempts\" >&2; exit 1; }\n    attempt=$((attempt + 1))\n    sleep 5\ndone\n[ -s \"$work/configureopnsense.sh.download\" ] || { echo \"Bootstrap download is empty\" >&2; exit 1; }\nmv \"$work/configureopnsense.sh.download\" \"$work/configureopnsense.sh\"\n# Keep this process alive so its exit status reports bootstrap success/failure.\n/bin/sh \"$work/configureopnsense.sh\" \"$1\"\n"
           },
           "resources": [
             {
@@ -1915,10 +1915,8 @@
                 "typeHandlerVersion": "1.5",
                 "autoUpgradeMinorVersion": false,
                 "settings": {
-                  "fileUris": [
-                    "[format('{0}{1}', parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptName'))]"
-                  ],
-                  "commandToExecute": "[format('sh configureopnsense.sh {0}', base64(string(createObject('scriptURI', parameters('ShellScriptObj').OpnScriptURI, 'opnVersion', parameters('ShellScriptObj').OpnVersion, 'agentMinimumVersion', parameters('ShellScriptObj').WALinuxVersion, 'role', parameters('ShellScriptObj').OpnType, 'publicIPAddress', parameters('ShellScriptObj').publicIPAddress, 'localTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'localTrustedIP'), ''), 'peerTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'peerTrustedIP'), ''), 'trustedSubnet', if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), 'windowsSubnet', if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '')))))]"
+                  "fileUris": [],
+                  "commandToExecute": "[format('/bin/sh -c ''{0}'' opnazure {1} {2}', variables('bootstrapLauncher'), base64(string(createObject('scriptURI', parameters('ShellScriptObj').OpnScriptURI, 'opnVersion', parameters('ShellScriptObj').OpnVersion, 'agentMinimumVersion', parameters('ShellScriptObj').WALinuxVersion, 'role', parameters('ShellScriptObj').OpnType, 'publicIPAddress', parameters('ShellScriptObj').publicIPAddress, 'localTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'localTrustedIP'), ''), 'peerTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'peerTrustedIP'), ''), 'trustedSubnet', if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), 'windowsSubnet', if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), '')))), base64(format('{0}{1}', parameters('ShellScriptObj').OpnScriptURI, parameters('ShellScriptName'))))]"
                 }
               },
               "dependsOn": [

@@ -16,7 +16,9 @@ freebsd:freebsd-15_1:15_1-release-amd64-gen2-zfs:latest
 
 Publisher `freebsd`, offer and AMD64 Gen2 ZFS plan were verified on 2026-09-29 using
 [the public Marketplace catalog](https://catalogapi.azure.com/offers/freebsd.freebsd-15_1?api-version=2018-08-01-beta).
-No authenticated regional image lookup or deployment has been run. Availability, quotas,
+The first reported TwoNics Azure attempt reached the guest extension but failed in legacy
+script preprocessing before the bootstrap ran. The inline-launcher correction has not yet
+been retested on Azure. Availability, quotas,
 Marketplace eligibility, CustomScriptForLinux 1.5 compatibility, Azure Agent reporting,
 configuration migrations and actual forwarding must be confirmed in your Azure test.
 
@@ -82,6 +84,48 @@ The inherited optional Windows deployment creates a route table but does **not**
 it automatically with the management subnet. If you enable it for a later test, verify and
 associate the table yourself before relying on a forwarding result. Its existing Windows
 image/size options are outside this FreeBSD/OPNsense update and need regional validation.
+
+## CustomScript failure: `invalid mode: 'rU'`
+
+The first Azure test reported this failure in
+`Microsoft.OSTCExtensions.CustomScriptForLinux-1.5.4/customscript.py`:
+
+```text
+preprocess_files -> dos2unix -> open(file_path, 'rU')
+ValueError: invalid mode: 'rU'
+```
+
+The handler downloaded the file and then failed while preparing it. The bootstrap had not
+started in this attempt. Python 3.11 removed the obsolete `U` file mode; changing the GitHub
+URL or retrying the same extension settings cannot fix that code path.
+
+The template now sets `fileUris: []` and embeds `scripts/launch-bootstrap.sh` in
+`commandToExecute`. The legacy handler supports inline commands without downloaded files.
+The launcher uses FreeBSD `fetch` over HTTPS to download the bootstrap into a private
+working directory, retries failed downloads, rejects empty files and propagates the
+bootstrap exit status. Inputs remain base64-encoded arguments, not interpolated shell code.
+Shell files are committed with LF line endings, so the handler does not need to normalize them.
+This correction is shared by TwoNics and Active-Active.
+
+To test the correction, reopen **Deploy to Azure from the updated branch README**.
+Do not use the old deployment's unchanged template/Retry action: that definition still contains
+`fileUris` and the failing download/preprocessing path. The new extension settings change the
+command and file list, allowing Azure to process a new configuration.
+
+For a clean comparison, use a fresh test Resource Group. Reusing the same VM is only appropriate
+if you confirm the failure was this pre-bootstrap error, with no prior partial conversion;
+keep the original deployment parameters and submit the updated template. If any conversion
+has already started, follow the existing partial-conversion guidance below instead.
+
+The old handler may log `fileUris value provided is empty or invalid. Continue with executing
+command...` for an inline command. That message alone is not a deployment failure; check the
+final command/extension status. The launcher is part of the compiled ARM template: editing
+only the downloaded bootstrap cannot correct a template that still uses the old file list.
+
+Sources:
+- [Python 3.11 file-mode change](https://docs.python.org/3.11/library/functions.html#open)
+- [Legacy CustomScript inline-command support](https://github.com/Azure/azure-linux-extensions/blob/ce24c534872610dab4a802735bb64056d81d700f/CustomScript/README.md)
+- [Handler download and preprocessing code](https://github.com/Azure/azure-linux-extensions/blob/ce24c534872610dab4a802735bb64056d81d700f/CustomScript/customscript.py)
 
 ## Diagnostics
 
