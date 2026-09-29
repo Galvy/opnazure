@@ -45,7 +45,7 @@ env:
   scenarioOption: "Active-Active"
   existingvirtualNetwork: "existing"
   DeployWindows: false
-  OpnScriptURI: "https://raw.githubusercontent.com/dmauser/opnazure/master/scripts/"
+  OpnScriptURI: "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/"
   DEPNAME: "Dep-OPNsense-Active-Active-${{ github.run_number }}" #Deployment Name
   AZCLIVERSION: 2.36.0 #Pinning to a specific AZ CLI version
 
@@ -96,7 +96,7 @@ jobs:
             az network vnet subnet create -g '${{ env.RG }}' --vnet-name '${{ env.VNET }}' -n '${{ env.UntrustedSubnet }}' --address-prefixes '${{ env.UntrustedSubnetAddress }}'
             az network vnet subnet create -g '${{ env.RG }}' --vnet-name '${{ env.VNET }}' -n '${{ env.TrustedSubnet }}' --address-prefixes '${{ env.TrustedSubnetAddress }}'
 
-            [[ ! -z "${GITHUB_HEAD_REF}" ]] && OpnScriptURI=$(echo ${{ env.OpnScriptURI }} | sed -e "s_master_${GITHUB_HEAD_REF}_")
+            OpnScriptURI="${{ env.OpnScriptURI }}"
             az deployment group validate -g '${{ env.RG }}' -n '${{ env.DEPNAME }}' -f ${{ env.TemplateFilePath }} -p ${{ env.ParamFilePath }} -p scenarioOption=${{ env.scenarioOption }} -p existingvirtualNetwork=${{ env.existingvirtualNetwork }} -p existingUntrustedSubnetName=${{ env.UntrustedSubnet }} -p existingTrustedSubnetName=${{ env.TrustedSubnet }} -p DeployWindows=${{ env.DeployWindows }} -p OpnScriptURI=$OpnScriptURI
 
   Deploy:
@@ -119,7 +119,7 @@ jobs:
         with:
           azcliversion: ${{ env.AZCLIVERSION }}
           inlineScript: |
-            [[ ! -z "${GITHUB_HEAD_REF}" ]] && OpnScriptURI=$(echo ${{ env.OpnScriptURI }} | sed -e "s_master_${GITHUB_HEAD_REF}_")
+            OpnScriptURI="${{ env.OpnScriptURI }}"
             echo Executing: az deployment group create -g ${{ env.RG }} -n ${{ env.DEPNAME }} -f ${{ env.TemplateFilePath }} -p ${{ env.ParamFilePath }} -p scenarioOption=${{ env.scenarioOption }} -p existingvirtualNetwork=${{ env.existingvirtualNetwork }} -p existingUntrustedSubnetName=${{ env.UntrustedSubnet }} -p existingTrustedSubnetName=${{ env.TrustedSubnet }} -p DeployWindows=${{ env.DeployWindows }} -p OpnScriptURI=$OpnScriptURI --verbose
             az deployment group create -g ${{ env.RG }} -n ${{ env.DEPNAME }} -f ${{ env.TemplateFilePath }} -p ${{ env.ParamFilePath }} -p scenarioOption=${{ env.scenarioOption }} -p existingvirtualNetwork=${{ env.existingvirtualNetwork }} -p existingUntrustedSubnetName=${{ env.UntrustedSubnet }} -p existingTrustedSubnetName=${{ env.TrustedSubnet }} -p DeployWindows=${{ env.DeployWindows }} -p OpnScriptURI=$OpnScriptURI --verbose
 

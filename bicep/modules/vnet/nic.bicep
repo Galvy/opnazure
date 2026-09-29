@@ -23,15 +23,15 @@ resource nic 'Microsoft.Network/networkInterfaces@2023-05-01' = {
             id: subnetId
           }
           privateIPAllocationMethod: 'Dynamic'
-          publicIPAddress: first(publicIPId) == '/' ? {
+          publicIPAddress: !empty(publicIPId) ? {
             id: publicIPId
           }:null
-          loadBalancerBackendAddressPools: first(loadBalancerBackendAddressPoolId) == '/' ? [
+          loadBalancerBackendAddressPools: !empty(loadBalancerBackendAddressPoolId) ? [
             {
               id: loadBalancerBackendAddressPoolId
             }
           ]:null
-          loadBalancerInboundNatRules: first(loadBalancerInboundNatRules) == '/' ? [
+          loadBalancerInboundNatRules: !empty(loadBalancerInboundNatRules) ? [
             {
               id: loadBalancerInboundNatRules
             }

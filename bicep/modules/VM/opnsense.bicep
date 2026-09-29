@@ -1,59 +1,50 @@
 param untrustedSubnetId string
-param trustedSubnetId string = ''
-param publicIPId string = ''
+param trustedSubnetId string
+param publicIPId string
 param virtualMachineName string
 param TempUsername string
-#disable-next-line secure-secrets-in-params
+@secure()
 param TempPassword string
 param virtualMachineSize string
-param OPNScriptURI string
+param FreeBSDImageVersion string = 'latest'
 param ShellScriptName string
-//param ShellScriptParameters string = ''
-param nsgId string = ''
-param ExternalLoadBalancerBackendAddressPoolId string = ''
-param InternalLoadBalancerBackendAddressPoolId string = ''
-param ExternalloadBalancerInboundNatRulesId string = ''
-param ShellScriptObj object = {}
-param multiNicSupport bool
+param nsgId string
+param ShellScriptObj object
 param Location string = resourceGroup().location
 
-var untrustedNicName = '${virtualMachineName}-Untrusted-NIC'
-var trustedNicName = '${virtualMachineName}-Trusted-NIC'
-
-resource trustedSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' existing = if (!empty(ShellScriptObj.TrustedSubnetName)){
+resource trustedSubnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' existing = {
   name: ShellScriptObj.TrustedSubnetName
 }
-
 resource windowsvmsubnet 'Microsoft.Network/virtualNetworks/subnets@2023-05-01' existing = if (!empty(ShellScriptObj.WindowsSubnetName)) {
   name: ShellScriptObj.WindowsSubnetName
 }
 
 module untrustedNic '../vnet/nic.bicep' = {
-  name: untrustedNicName
-  params:{
+  name: '${virtualMachineName}-Untrusted-NIC'
+  params: {
     Location: Location
-    nicName: untrustedNicName
+    nicName: '${virtualMachineName}-Untrusted-NIC'
     subnetId: untrustedSubnetId
     publicIPId: publicIPId
     enableIPForwarding: true
     nsgId: nsgId
-    loadBalancerBackendAddressPoolId: ExternalLoadBalancerBackendAddressPoolId
-    loadBalancerInboundNatRules: ExternalloadBalancerInboundNatRulesId
   }
 }
-
-module trustedNic '../vnet/nic.bicep' = if(multiNicSupport){
-  name: trustedNicName
-  params:{
+module trustedNic '../vnet/nic.bicep' = {
+  name: '${virtualMachineName}-Trusted-NIC'
+  params: {
     Location: Location
-    nicName: trustedNicName
+    nicName: '${virtualMachineName}-Trusted-NIC'
     subnetId: trustedSubnetId
     enableIPForwarding: true
     nsgId: nsgId
-    loadBalancerBackendAddressPoolId: InternalLoadBalancerBackendAddressPoolId
   }
 }
 
+// Verified against the public Azure Marketplace catalog on 2026-09-29.
+var imagePublisher = 'freebsd'
+var imageOffer = 'freebsd-15_1'
+var imageSku = '15_1-release-amd64-gen2-zfs'
 resource OPNsense 'Microsoft.Compute/virtualMachines@2023-07-01' = {
   name: virtualMachineName
   location: Location
@@ -63,51 +54,38 @@ resource OPNsense 'Microsoft.Compute/virtualMachines@2023-07-01' = {
       adminUsername: TempUsername
       adminPassword: TempPassword
     }
-    hardwareProfile: {
-      vmSize: virtualMachineSize
-    }
+    hardwareProfile: { vmSize: virtualMachineSize }
     storageProfile: {
-      osDisk: {
-        createOption: 'FromImage'
-      }
+      osDisk: { createOption: 'FromImage' }
       imageReference: {
-        publisher: 'thefreebsdfoundation'
-        offer: 'freebsd-14_1'
-        sku: '14_1-release-amd64-gen2-zfs'
-        version: 'latest'
+        publisher: imagePublisher
+        offer: imageOffer
+        sku: imageSku
+        version: FreeBSDImageVersion
       }
     }
+    diagnosticsProfile: { bootDiagnostics: { enabled: true } }
     networkProfile: {
-      networkInterfaces: multiNicSupport == true ?[
-        {
-          id: untrustedNic.outputs.nicId
-          properties:{
-            primary: true
-          }
-        }
-        {
-          id: trustedNic.outputs.nicId
-          properties:{
-            primary: false
-          }
-        }
-      ]:[
-        {
-          id: untrustedNic.outputs.nicId
-          properties:{
-            primary: true
-          }
-        }
+      networkInterfaces: [
+        { id: untrustedNic.outputs.nicId, properties: { primary: true } }
+        { id: trustedNic.outputs.nicId, properties: { primary: false } }
       ]
     }
   }
-  plan: {
-    name: '14_1-release-amd64-gen2-zfs'
-    publisher: 'thefreebsdfoundation'
-    product: 'freebsd-14_1'
-  }
+  plan: { name: imageSku, publisher: imagePublisher, product: imageOffer }
 }
 
+var trustedPrefix = contains(trustedSubnet.properties, 'addressPrefixes') ? trustedSubnet.properties.addressPrefixes[0] : trustedSubnet.properties.addressPrefix
+var windowsPrefix = !empty(ShellScriptObj.WindowsSubnetName) ? (contains(windowsvmsubnet!.properties, 'addressPrefixes') ? windowsvmsubnet!.properties.addressPrefixes[0] : windowsvmsubnet!.properties.addressPrefix) : ''
+// JSON preserves empty optional arguments and avoids interpolation into a shell command.
+var bootstrapSettings = {
+  scriptURI: ShellScriptObj.OpnScriptURI
+  opnVersion: ShellScriptObj.OpnVersion
+  agentMinimumVersion: ShellScriptObj.WALinuxVersion
+  role: 'TwoNics'
+  trustedSubnet: trustedPrefix
+  windowsSubnet: windowsPrefix
+}
 resource vmext 'Microsoft.Compute/virtualMachines/extensions@2023-07-01' = {
   parent: OPNsense
   name: 'CustomScript'
@@ -117,15 +95,11 @@ resource vmext 'Microsoft.Compute/virtualMachines/extensions@2023-07-01' = {
     type: 'CustomScriptForLinux'
     typeHandlerVersion: '1.5'
     autoUpgradeMinorVersion: false
-    settings:{
-      fileUris: [
-        '${OPNScriptURI}${ShellScriptName}'
-      ]
-      commandToExecute: 'sh ${ShellScriptName} ${ShellScriptObj.OpnScriptURI} ${ShellScriptObj.OpnVersion} ${ShellScriptObj.WALinuxVersion} ${ShellScriptObj.OpnType} ${!empty(ShellScriptObj.TrustedSubnetName) ? contains(trustedSubnet.properties, 'addressPrefixes') ? trustedSubnet.properties.addressPrefixes[0] : trustedSubnet.properties.addressPrefix : ''} ${!empty(ShellScriptObj.WindowsSubnetName) ? contains(windowsvmsubnet.properties, 'addressPrefixes') ? windowsvmsubnet.properties.addressPrefixes[0] : windowsvmsubnet.properties.addressPrefix : '1.1.1.1/32'} ${ShellScriptObj.publicIPAddress} ${ShellScriptObj.opnSenseSecondarytrustedNicIP}'
+    settings: {
+      fileUris: [ '${ShellScriptObj.OpnScriptURI}${ShellScriptName}' ]
+      commandToExecute: 'sh configureopnsense.sh ${base64(string(bootstrapSettings))}'
     }
   }
 }
-
 output untrustedNicIP string = untrustedNic.outputs.nicIP
-output trustedNicIP string = multiNicSupport == true ? trustedNic.outputs.nicIP : ''
-output untrustedNicProfileId string = untrustedNic.outputs.nicIpConfigurationId
+output trustedNicIP string = trustedNic.outputs.nicIP
