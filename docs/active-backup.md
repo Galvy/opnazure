@@ -1,190 +1,166 @@
-# Active-backup VPN site on Azure
+# Manual active-backup for planned upgrades
 
-This is a separate, executable fresh-deployment template for two OPNsense 26.7
-VMs bootstrapped from FreeBSD 15.1. Azure remains a peripheral site; the existing
-FortiGate hub and enterprise routing are not changed.
+This template supports **planned maintenance only**. Primary is initially selected
+for traffic; Secondary is running and manageable but isolated from workload traffic.
+There is no automatic failover after a VM, OPNsense or VPN failure.
 
-**Status:** ARM/Bicep compilation and local fault-injection tests only. No Azure
-active-backup deployment or real VPN failover has been validated by this change.
-Use a new test resource group. Successful ARM provisioning is not proof of VPN
-connectivity or HA readiness; follow the acceptance steps below.
+The standalone template replaces the earlier automatic variant on this branch.
+It creates no witness Storage, managed identities, custom RBAC roles, election
+controller or firewall-to-firewall power permissions. Operators switch nodes using
+their own Azure credentials. Configuration and VPN session synchronization are not
+installed automatically.
 
-## Deploy from the local artifact
+**Validation:** Bicep compilation, shell checks and local tests. No real Azure deploy,
+manual handover or VPN connectivity test has been performed for this variant.
 
-Use **`ARM/active-backup.json`**, not the existing `ARM/main.json` or its scenario
-selector. The ARM file embeds the fork's bootstrap, configuration renderer and HA
-controller, so no branch publication, GitHub token or PR is needed. Upstream
-OPNsense bootstrap and package repositories still require Internet access.
+## Deploy
 
-In Azure Portal:
+Use a **new test resource group** and load `ARM/active-backup.json` through Azure
+Portal: **Deploy a custom template → Build your own template in the editor → Load
+file**. Existing `ARM/main.json` buttons still deploy TwoNics/Active-Active.
 
-1. Open **Deploy a custom template**.
-2. Choose **Build your own template in the editor**, then **Load file**.
-3. Load `ARM/active-backup.json` and save.
-4. Select a new resource group and region. Enter the management public IPv4 CIDR
-   and a temporary bootstrap administrator password. Adjust the infrastructure
-   CIDRs before deployment if the defaults overlap your networks.
-5. Review the resources and submit when ready.
+The ARM file embeds the fork's scripts. It works without publishing the branch or
+opening a PR. Internet access is still required for the upstream OPNsense bootstrap
+and packages. `scriptURI` is source provenance, not an alternative download switch.
 
-The defaults are a `10.80.0.0/16` VNet, `10.80.0.0/24` WAN,
-`10.80.1.0/24` Trusted-Transit and `10.80.2.0/24` Trusted-Servers. No Windows VMs,
-enterprise UDRs, VPN instances, VPN credentials or BGP neighbors are created.
-The two VM NICs keep distinct private IPs. Do not put Windows workloads in the
-transit subnet; create them in Trusted-Servers and configure routing manually.
+Parameters include:
 
-Prerequisites:
+- Region, cluster name, a VM size supporting two NICs and FreeBSD image revision.
+- VNet/WAN/Trusted-Transit/Trusted-Servers CIDRs. Defaults are `10.80.0.0/16`,
+  `10.80.0.0/24`, `10.80.1.0/24`, `10.80.2.0/24`. Choose non-overlapping ranges.
+- Your management public IPv4 CIDR and a temporary Azure bootstrap password.
+- OpenVPN UDP and WireGuard UDP ports, default 1194 and 51820; choose distinct ports.
 
-- Region availability/quota for the selected two-NIC VM size, FreeBSD Marketplace
-  image and Standard_ZRS Storage. The template uses an availability set, not zones.
-- Marketplace terms accepted for `freebsd:freebsd-15_1:15_1-release-amd64-gen2-zfs`.
-- Rights to deploy resources, custom roles and role assignments. Compute operation
-  status requires a narrowly scoped **read-only action at subscription scope**;
-  this template includes a subscription deployment for that assignment. RG-only
-  Contributor access is insufficient.
-- Public Azure cloud endpoints. Sovereign-cloud endpoint variations are not
-  supported by this initial controller.
+The region must support the selected VM SKU and Marketplace image. Accept Marketplace
+terms for `freebsd:freebsd-15_1:15_1-release-amd64-gen2-zfs` if required. Normal deployment
+permissions are needed; this variant does not create subscription-scoped RBAC.
 
-`scriptURI` records source provenance and defaults to this fork/branch. All files
-used from that URI are embedded, including the HA installer. It is not a switch
-for downloading alternative scripts. Change sources and rebuild ARM instead.
+The template deploys two FreeBSD 15.1 → OPNsense 26.7 VMs in an availability set,
+with unique WAN/LAN NIC addresses, a public Standard LB, an internal Standard LB
+and separate per-node NSGs. It does not create Windows VMs, business routes, BGP
+neighbors, VPN tunnels, pools, keys or user certificates.
 
-Do not redeploy this fresh-install template over a running HA cluster: the NSG
-resource definitions start closed and would reset the active gates. Do not delete
-or recreate the witness to force failover. No public Deploy to Azure link is
-provided until the branch is published; local file deployment works independently.
+Do not redeploy this fresh-install template over a running pair: it would reset
+selection to Primary. It is **not an in-place migration** from the earlier automatic
+variant. An incremental ARM deployment does not remove its old controllers, identities
+or roles. Use fresh VMs/resources to test this version.
 
-## Resources and access
+## Initial configuration
 
-- Two VMs, each with its own managed identity and NSG on both NICs.
-- Public Standard LB with UDP 500/4500, OpenVPN UDP 1194 and WireGuard UDP 51820.
-  The latter two ports are parameters and must be distinct. Configure matching
-  OPNsense listeners/firewall rules yourself. Use IPsec NAT-T; this is not an ESP
-  protocol load balancer.
-- Management NAT: public TCP 50443 -> Primary TCP 443; 50444 -> Secondary TCP 443.
-  These identify nodes, not the active role, and are restricted by
-  `managementSourceCIDR` even when workload gates are open. SSH is not published.
-- Internal Standard LB with HA Ports. `internalNextHop` is the output to use when
-  configuring Windows subnet route tables. Return routes in OPNsense are also
-  required. The template does not install them.
-- Both LBs use the same HTTP role probe on private TCP 8080 from Azure's platform
-  address. OPNsense's GUI is not the role probe.
-- A private Storage container for a 60-second exclusive lease. Access uses managed
-  identity, not account keys. A node may only power off its peer VM. Both identities
-  may update rules on the two dedicated NSGs. No VM start permission is granted.
+After provisioning, verify `/var/db/opnazure/status` reports `ready` on both nodes.
+Logs: `/var/log/opnazure-bootstrap.log` and `/var/log/opnazure-firstboot.log`.
+These are bootstrap records, not ongoing health checks. The pinned version checks
+run only until the first successful boot, so later manual upgrades are not rejected
+for changing the OPNsense/FreeBSD version.
 
-Control-plane exceptions remain open on standby: restricted management, HTTPS
-between the transit NICs, Azure platform endpoints, outbound HTTP/HTTPS and NTP.
-Guest system DNS uses Azure's resolver directly, avoiding dependency on recursive
-DNS or a workload VPN. Keep that control path available when configuring routing.
-**Do not use control-plane ports for VPN services** or remove/override the generated
-NSG rules. This initial variant supports the UDP VPN endpoints listed above, not
-OpenVPN TCP 443. The gate is not a defense against an administrator altering Azure
-RBAC/NSGs or executing arbitrary root commands.
+Management URLs are deployment outputs:
 
-## Election and sudden failure
+- `https://PUBLIC_IP:50443` → Primary HTTPS 443.
+- `https://PUBLIC_IP:50444` → Secondary HTTPS 443.
 
-Both NSGs initially deny workload traffic. After first-boot checks, a controller
-closes its own gate, obtains the Blob lease and records ownership. Only the first
-bootstrap of a new witness can skip fencing, and only after verifying the peer's
-NSG workload rules are closed. This lets both new nodes remain running for setup.
+Both remain available from `managementSourceCIDR` while their VMs are running,
+regardless of selection. OPNsense initially uses `root` / `opnsense`; change both
+passwords. The Azure bootstrap password is not the converted OPNsense root password.
+SSH is not published by the public LB.
 
-Every subsequent promotion performs these steps under a renewed lease:
+Configure routing and VPNs on both nodes. Keep node-specific NIC settings distinct.
+If using XMLRPC, configure selective synchronization yourself and check release
+compatibility before allowing synchronization between different firmware versions.
+No pfsync or automatic replication of runtime VPN sessions is configured.
 
-1. If the peer is not already stopped/deallocated, request hard power-off
-   (`skipShutdown=true`).
-2. Wait for the Compute operation to succeed and the VM to report stopped or
-   deallocated. A probe failure alone is never sufficient.
-3. Close both peer NSG workload rules and verify the updates completed.
-4. Open the candidate's workload rules, revalidate the lease, then return HTTP 200
-   to both load balancers.
+Use Trusted-Servers for Windows workloads. Configure its UDRs toward the
+`internalNextHop` output, plus OPNsense return routes and the FortiGate return paths.
+Azure remains a peripheral site; the FortiGate headquarters remains the hub.
 
-No preemption or automatic failback. A failed/fenced node stays stopped; there is
-no automatic power-on that could race with an outstanding fencing operation.
-A lease renewal outage gets a local cutoff at 40 seconds from the start of the
-last successful renewal. A watchdog withdraws readiness and disables both guest
-NICs at that cutoff. Management of that failed node is also lost until recovery.
-A frozen/killed controller may not perform this local action; the successor still
-MUST fence it. Ambiguous promotion failures locally isolate the candidate rather
-than retrying a potentially unsafe gate opening.
+Public VPN rules publish UDP 500/4500 (IPsec NAT-T), OpenVPN UDP and WireGuard UDP.
+Configure matching guest listeners, firewall rules and NAT exemptions. OpenVPN clients
+should receive only the allowed Azure routes and be restricted by firewall rules.
+Use a separate pool/policy for WireGuard servers. Validate the public source IP/port
+of Azure-initiated IPsec tunnels with FortiGate; template success does not prove
+outbound SNAT or return-path correctness.
 
-If Storage/Compute/identity services cannot establish safe ownership, service may
-remain unavailable. This design prioritizes avoiding split brain. NSG updates do
-not terminate established flows; they are not a replacement for hard fencing.
+## Selection mechanism
 
-Failover time includes lease expiration (up to 60 seconds), Azure API/RBAC/network
-latency, fencing, NSG propagation, LB probes and VPN reconnection. No fixed RTO or
-uninterrupted VPN sessions are promised. Allow minutes in the initial test plan.
+Both LBs use TCP 443 probes. This checks GUI reachability, **not VPN readiness**.
+Selection is controlled by three rules in each `<cluster>-<node>-Gate` NSG:
 
-The probe checks **role/lease ownership after first-boot validation**, not the health
-of every manually configured VPN. A remote ISP outage must be handled by tunnel
-routing, not by switching firewall nodes. This version does not detect an individual
-OpenVPN/IPsec/WireGuard daemon hang if the controller and VM remain healthy.
+| Rule | Selected node | Standby |
+| --- | --- | --- |
+| `Role-Probe` (AzureLoadBalancer → TCP 443) | Allow | Deny |
+| `Workload-Inbound` | Allow | Deny |
+| `Workload-Outbound` | Allow | Deny |
 
-## Configure and inspect
+The standby probe is blocked independently of administrator access to its GUI.
+Even if a guest service starts after an upgrade or GUI apply, its workload traffic
+remains blocked outside the guest. Keep these Azure rules intact.
 
-1. Wait for successful provisioning and `/var/db/opnazure/status` = `ready` on both
-   guests. Inspect `/var/log/opnazure-bootstrap.log` and
-   `/var/log/opnazure-firstboot.log` if either guest does not finish.
-2. Open both management URLs. The converted OPNsense configuration initially uses
-   `root` / `opnsense`, as in the existing bootstrap. **Change it on both nodes**.
-   The Azure bootstrap administrator password is not the OPNsense root password.
-3. Inspect `/var/log/opnazure-ha.log`. Exactly one running node should report
-   `ACTIVE`. On the guest console this read-only command checks its LB readiness:
+Standby control-plane exceptions allow restricted management, HTTPS from the transit
+subnet, outbound HTTP/HTTPS for updates, NTP and Azure platform endpoints. System DNS
+uses Azure directly. Do not route this control path through workload VPNs or use its
+reserved ports for VPN services. This variant supports the UDP VPN endpoints above,
+not OpenVPN TCP 443. Do not enable both nodes' workload/probe rules simultaneously.
 
-   ```sh
-   fetch -q -o /dev/null http://127.0.0.1:8080/health && echo ACTIVE || echo NOT-ACTIVE
-   ```
+## Planned upgrade and switchover
 
-4. Configure VPNs, certificates/keys, NAT exemptions, routes and firewall rules on
-   both guests. Configure the same service identity where required, but preserve
-   each node's unique NIC addressing. The standby can run its UDP daemons, but its
-   NSG blocks their workload traffic. BGP traffic is blocked there too.
-5. There is **no automatic XMLRPC or pfsync configuration** in this template.
-   Manually maintain both nodes, or configure and test selective XMLRPC replication
-   from a designated configuration source. Do not synchronize node-specific Azure
-   identity/HA files. Runtime VPN session state is not replicated by this controller.
-6. For workloads, add Azure UDRs toward `internalNextHop` and return routes in
-   OPNsense via the trusted Azure gateway. Configure headquarters/site return routes.
-   Keep Azure control-plane traffic on the WAN path, independent of these VPNs.
-7. OpenVPN client access must be restricted to Azure services in firewall rules.
-   WireGuard requires its own pool/rules. No tunnel or pool is pre-created.
+Use one operator and one console for the whole operation. No distributed lock exists;
+concurrent switching, portal rule edits or template redeployment are unsupported.
+Before switching, back up both configurations and verify the target's firmware,
+interfaces, certificates/keys, routes and services in its GUI. Mere VM `running`
+status does not establish readiness.
 
-Do not stop/restart the controller as a routine GUI operation: stopping an active
-controller intentionally isolates its interfaces. The standby must already contain
-usable VPN/routing configuration before you rely on workload failover.
+1. With Primary selected, update and reboot Secondary while it remains isolated.
+2. Check Secondary and schedule the interruption.
+3. Run the manual switch to Secondary. The helper disables the old probe, gracefully
+   deallocates Primary, verifies it is stopped, closes its workload rules, then opens
+   Secondary's workload rules and enables its probe last.
+4. Wait for **both** LB probes to converge and test actual VPN/workload traffic.
+5. Start Primary as an isolated standby, update it and verify its configuration.
+6. Leave Secondary selected. Returning to Primary is optional and requires another
+   planned switchover.
 
-## Acceptance test in a disposable deployment
+NSG rule changes do not terminate established connections. **Stopping the old node
+before enabling the target is mandatory**, not just a probe change. Expect an outage
+and VPN/client reconnection; there is no seamless session migration.
 
-- Verify only one node returns HTTP 200 and both management URLs work.
-- Confirm actual IPsec flows through both ISP endpoints, including tunnels initiated
-  by OPNsense. Check the public source IP/port and return-path symmetry: the public
-  LB's outbound SNAT must be verified with FortiGate, not inferred from ARM success.
-- Verify OpenVPN Windows clients reach only the intended Azure services and test
-  WireGuard server traffic. Confirm standby traffic is blocked in both directions.
-- Hard-stop the active VM in Azure. Verify peer power-off completion/quarantine,
-  one active LB backend and client/tunnel recovery. Record timestamps and packets.
-- Separately test a killed controller and loss of Storage/Compute access. Never
-  simulate Storage loss by deleting or breaking the witness lease.
-- Reboot/apply configuration on a healthy standby; it must remain gated.
-- Confirm the template still starts without any VPN configured. Empty VPN config
-  is expected at initial deployment and does not prevent election.
+The helper requires Python 3 and Azure CLI (for example in Azure Cloud Shell),
+`az login`, and operator rights to read/start/deallocate these VMs and update their
+NSG rules. It is never installed or run automatically on the firewalls.
 
-These Azure/FreeBSD tests have **not** been run by the local validation suite.
+Read-only inspection:
 
-## Rejoin a fenced node
+```sh
+python3 scripts/manual-switchover.py status \
+  --subscription YOUR_SUBSCRIPTION_ID --resource-group YOUR_RG --cluster opn-vpn
+```
 
-First repair the cause of failure and confirm the surviving node is active. In
-Azure, verify all earlier power-off operations have completed and the stopped
-node's `Workload-Inbound` and `Workload-Outbound` rules both read `Deny`, with NSG
-provisioning complete. If an operation failed or its outcome is unknown, resolve
-that before starting the node. The survivor closes these gates during takeover.
+Execute the planned switch after checking Secondary:
 
-Start the stopped VM manually. It must finish boot, close/verify its own gate and
-remain standby because the surviving owner still holds the lease. Verify both
-management and its HTTP 503 response before considering redundancy restored.
-Do not force-open its gates. Keep it stopped if quarantine cannot be verified.
+```sh
+python3 scripts/manual-switchover.py switch --node Secondary \
+  --subscription YOUR_SUBSCRIPTION_ID --resource-group YOUR_RG --cluster opn-vpn
+```
 
-## Build, validation and cleanup
+Start the isolated Primary for maintenance:
+
+```sh
+python3 scripts/manual-switchover.py start-standby --node Primary \
+  --subscription YOUR_SUBSCRIPTION_ID --resource-group YOUR_RG --cluster opn-vpn
+```
+
+A failed or unconfirmed stop prevents enabling the target. Any later failure stops
+the procedure without automatic rollback; an outage may remain. Inspect `status`
+and Azure operation completion before retrying. A partial switch can be explicitly
+resumed with the same target. Never start a VM whose workload isolation is uncertain.
+
+For rollback, first prepare/start Primary with its three rules at `Deny`, then invoke
+`switch --node Primary`. It stops and isolates Secondary before enabling Primary.
+If the selected VM is not running, inspect and repair the situation manually: the
+helper's `start-standby` intentionally requires a running selected peer. There is no
+unattended disaster recovery in this variant.
+
+## Validation and maintenance
+
+Local checks:
 
 ```sh
 bicep build bicep/active-backup.bicep --outfile ARM/active-backup.json
@@ -192,18 +168,15 @@ python3 -m unittest discover -s tests -v
 shellcheck scripts/embedded-bootstrap.sh scripts/configureopnsense.sh
 ```
 
-Rebuild ARM whenever an embedded script/configuration changes. The test suite
-compares embedded artifacts byte-for-byte and executes the real extraction launcher
-with a harmless substitute for the privileged conversion command. Controller tests
-inject lease conflicts, expiration, failed fencing and partial gate updates.
+Rebuild ARM whenever an embedded script changes. Tests compare the embedded payload
+with source, execute the extraction launcher with a harmless bootstrap substitute,
+and simulate successful/failed shutdowns, partial NSG updates, safe standby startup
+and reverse handover. Existing scenario regression tests remain in place.
 
-Deleting the test resource group removes the VMs, LB, Storage and identities.
-The subscription-scoped operation-status role/assignments and subscription deployment
-record must also be removed explicitly after verifying they belong to this test
-cluster. Record their identifiers from the `opn-ha-status-*` deployment. Do not
-remove another cluster's roles.
+Before production, deploy a disposable pair and validate both management URLs,
+standby isolation after GUI apply/reboot, actual IPsec/OpenVPN/WireGuard traffic,
+Primary→Secondary handover, standby update and reverse handover. Record downtime
+and inspect both LB backends. A sudden failure must **not** activate the standby.
 
-References: [Azure Blob leases](https://learn.microsoft.com/en-us/rest/api/storageservices/lease-blob),
-[NSG connection behavior](https://learn.microsoft.com/en-us/azure/virtual-network/network-security-groups-overview),
-[asynchronous operations](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/async-operations),
-[Compute operation permissions](https://learn.microsoft.com/en-us/azure/role-based-access-control/permissions/compute).
+References: [Azure NSG connection behavior](https://learn.microsoft.com/en-us/azure/virtual-network/network-security-groups-overview),
+[Azure CLI VM operations](https://learn.microsoft.com/en-us/cli/azure/vm).

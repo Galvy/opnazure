@@ -1,4 +1,4 @@
-// Active-backup topology. NSG workload gates start CLOSED on both nodes.
+// Manual active-backup topology. Primary selected by initial NSG gates.
 param Location string = resourceGroup().location
 param virtualMachineName string
 param virtualMachineSize string
@@ -9,8 +9,6 @@ param windowsSubnetName string = ''
 param publicIPId string
 param publicIPAddress string
 param nsgIds array
-param identities array
-param witnessBlobUrl string
 @minValue(1024)
 @maxValue(65535)
 param openVpnPort int = 1194
@@ -108,9 +106,8 @@ module elb 'vnet/lb.bicep' = {
       {
         name: externalLoadBalanceProbeName
         properties: {
-          port: 8080
-          protocol: 'Http'
-          requestPath: '/health'
+          port: 443
+          protocol: 'Tcp'
           intervalInSeconds: 5
           numberOfProbes: 2
         }
@@ -185,9 +182,8 @@ module ilb 'vnet/lb.bicep' = {
       {
         name: internalLoadBalanceProbeName
         properties: {
-          port: 8080
-          protocol: 'Http'
-          requestPath: '/health'
+          port: 443
+          protocol: 'Tcp'
           intervalInSeconds: 5
           numberOfProbes: 2
         }
@@ -245,15 +241,9 @@ module nodes 'VM/opnsense-ha.bicep' = [for (role, i) in roles: {
     TempPassword: TempPassword
     FreeBSDImageVersion: FreeBSDImageVersion
     availabilitySetId: availability.id
-    managedIdentityId: identities[i].id
     haConfig: {
       node: role
-      client_id: identities[i].clientId
-      blob_url: witnessBlobUrl
-      own_nsg_id: nsgIds[i]
-      peer_nsg_id: nsgIds[1 - i]
-      peer_vm_id: resourceId('Microsoft.Compute/virtualMachines', '${virtualMachineName}-${roles[1 - i]}')
-      probe_port: 8080
+      mode: 'manual'
     }
     providedNics: {
       wanId: wanNics[i].outputs.nicId

@@ -3,7 +3,6 @@ param trustedSubnetId string
 param publicIPId string = ''
 param providedNics object = {}
 param availabilitySetId string = ''
-param managedIdentityId string = ''
 param haConfig object = {}
 param virtualMachineName string
 param TempUsername string
@@ -51,10 +50,6 @@ var imageSku = '15_1-release-amd64-gen2-zfs'
 resource OPNsense 'Microsoft.Compute/virtualMachines@2023-07-01' = {
   name: virtualMachineName
   location: Location
-  identity: empty(managedIdentityId) ? null : {
-    type: 'UserAssigned'
-    userAssignedIdentities: { '${managedIdentityId}': {} }
-  }
   properties: {
     osProfile: {
       computerName: virtualMachineName
@@ -108,8 +103,6 @@ var embeddedSources = {
   'prepare_config.py': loadFileAsBase64('../../../scripts/prepare_config.py')
   'actions_waagent.conf': loadFileAsBase64('../../../scripts/actions_waagent.conf')
   'verify_opnsense.sh': loadFileAsBase64('../../../scripts/verify_opnsense.sh')
-  'ha/agent.py': loadFileAsBase64('../../../scripts/ha/agent.py')
-  'ha/install.py': loadFileAsBase64('../../../scripts/ha/install.py')
 }
 var bootstrapLauncher = loadTextContent('../../../scripts/embedded-bootstrap.sh')
 resource vmext 'Microsoft.Compute/virtualMachines/extensions@2023-07-01' = {

@@ -2,9 +2,8 @@ param location string
 param clusterName string
 param managementSourceCIDR string
 param trustedSubnetCIDR string
-param identities array
 
-// An operator can manage both nodes. Workload traffic is closed until election.
+// Manual selection: only Primary initially admits workload traffic and LB probes.
 // Do not use these control-plane ports for VPN listeners.
 var controlRules = [
   {
@@ -47,19 +46,6 @@ var controlRules = [
     }
   }
   {
-    name: 'Role-Probe'
-    properties: {
-      priority: 120
-      direction: 'Inbound'
-      access: 'Allow'
-      protocol: 'Tcp'
-      sourceAddressPrefix: 'AzureLoadBalancer'
-      sourcePortRange: '*'
-      destinationAddressPrefix: '*'
-      destinationPortRange: '8080'
-    }
-  }
-  {
     name: 'Control-HTTPS'
     properties: {
       priority: 100
@@ -99,60 +85,51 @@ var controlRules = [
     }
   }
 ]
-var workloadRules = [for direction in ['Inbound', 'Outbound']: {
-      name: 'Workload-${direction}'
-      properties: {
-        priority: 200
-        direction: direction
-        access: 'Deny'
-        protocol: '*'
-        sourceAddressPrefix: '*'
-        sourcePortRange: '*'
-        destinationAddressPrefix: '*'
-        destinationPortRange: '*'
-      }
-    }]
 resource gates 'Microsoft.Network/networkSecurityGroups@2023-05-01' = [for node in ['Primary', 'Secondary']: {
   name: '${clusterName}-${node}-Gate'
   location: location
   properties: {
-    securityRules: concat(controlRules, workloadRules)
-  }
-}]
-resource gateRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
-  name: guid(resourceGroup().id, clusterName, 'ha-gates')
-  properties: {
-    roleName: 'OPNazure gates ${uniqueString(resourceGroup().id, clusterName)}'
-    type: 'CustomRole'
-    assignableScopes: [resourceGroup().id]
-    permissions: [{
-      actions: [
-        'Microsoft.Network/networkSecurityGroups/read'
-        'Microsoft.Network/networkSecurityGroups/securityRules/read'
-        'Microsoft.Network/networkSecurityGroups/securityRules/write'
-      ]
-      notActions: []
-      dataActions: []
-      notDataActions: []
-    }]
-  }
-}
-resource primaryAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (node, i) in ['Primary', 'Secondary']: {
-  name: guid(gates[i].id, identities[0].principalId, gateRole.id)
-  scope: gates[i]
-  properties: {
-    roleDefinitionId: gateRole.id
-    principalId: identities[0].principalId
-    principalType: 'ServicePrincipal'
-  }
-}]
-resource secondaryAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (node, i) in ['Primary', 'Secondary']: {
-  name: guid(gates[i].id, identities[1].principalId, gateRole.id)
-  scope: gates[i]
-  properties: {
-    roleDefinitionId: gateRole.id
-    principalId: identities[1].principalId
-    principalType: 'ServicePrincipal'
+    securityRules: concat(controlRules, [
+      {
+        name: 'Role-Probe'
+        properties: {
+          priority: 120
+          direction: 'Inbound'
+          access: node == 'Primary' ? 'Allow' : 'Deny'
+          protocol: 'Tcp'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+        }
+      }
+      {
+        name: 'Workload-Inbound'
+        properties: {
+          priority: 200
+          direction: 'Inbound'
+          access: node == 'Primary' ? 'Allow' : 'Deny'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+        }
+      }
+      {
+        name: 'Workload-Outbound'
+        properties: {
+          priority: 200
+          direction: 'Outbound'
+          access: node == 'Primary' ? 'Allow' : 'Deny'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+        }
+      }
+    ])
   }
 }]
 output ids array = [for i in range(0, 2): gates[i].id]

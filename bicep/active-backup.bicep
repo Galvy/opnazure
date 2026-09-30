@@ -1,3 +1,4 @@
+// Manual maintenance only: Primary initially active, Secondary isolated.
 // Dedicated fresh-deployment entry point. No enterprise routes or VPN instances.
 param location string = resourceGroup().location
 @minLength(1)
@@ -40,11 +41,6 @@ module vnet 'modules/vnet/vnet.bicep' = {
     ]
   }
 }
-module witness 'modules/ha/witness.bicep' = {
-  name: '${clusterName}-witness'
-  params: { location: location, clusterName: clusterName }
-}
-var identities = [witness.outputs.primaryIdentity, witness.outputs.secondaryIdentity]
 module gates 'modules/ha/gates.bicep' = {
   name: '${clusterName}-gates'
   params: {
@@ -52,7 +48,6 @@ module gates 'modules/ha/gates.bicep' = {
     clusterName: clusterName
     managementSourceCIDR: managementSourceCIDR
     trustedSubnetCIDR: trustedTransitCIDR
-    identities: identities
   }
 }
 module publicIP 'modules/vnet/publicip.bicep' = {
@@ -76,8 +71,6 @@ module pair 'modules/active-backup.bicep' = {
     publicIPId: publicIP.outputs.publicipId
     publicIPAddress: publicIP.outputs.publicipAddress
     nsgIds: gates.outputs.ids
-    identities: identities
-    witnessBlobUrl: witness.outputs.blobUrl
     TempUsername: 'azureuser'
     TempPassword: bootstrapAdminPassword
     FreeBSDImageVersion: imageVersion
@@ -89,24 +82,6 @@ module pair 'modules/active-backup.bicep' = {
   }
   dependsOn: [vnet]
 }
-module fencePrimary 'modules/ha/fence-access.bicep' = {
-  name: '${clusterName}-fence-primary'
-  params: {
-    peerVmName: '${clusterName}-Secondary'
-    principalId: identities[0].principalId
-    roleDefinitionId: witness.outputs.fenceRoleId
-  }
-  dependsOn: [pair]
-}
-module fenceSecondary 'modules/ha/fence-access.bicep' = {
-  name: '${clusterName}-fence-secondary'
-  params: {
-    peerVmName: '${clusterName}-Primary'
-    principalId: identities[1].principalId
-    roleDefinitionId: witness.outputs.fenceRoleId
-  }
-  dependsOn: [pair]
-}
 output publicIPAddress string = publicIP.outputs.publicipAddress
 output primaryManagementURL string = 'https://${publicIP.outputs.publicipAddress}:50443'
 output secondaryManagementURL string = 'https://${publicIP.outputs.publicipAddress}:50444'
@@ -114,12 +89,3 @@ output internalNextHop string = pair.outputs.internalLoadBalancerIP
 output primaryTrustedIP string = pair.outputs.primaryTrustedIP
 output secondaryTrustedIP string = pair.outputs.secondaryTrustedIP
 output setup string = 'Change root passwords; configure VPNs/routing on both nodes; see docs/active-backup.md. No workload routes or VPN instances are installed.'
-
-module operationAccess 'modules/ha/operation-access.bicep' = {
-  scope: subscription()
-  name: 'opn-ha-status-${uniqueString(resourceGroup().id, clusterName)}'
-  params: {
-    principalIds: [identities[0].principalId, identities[1].principalId]
-    clusterId: '${resourceGroup().id}/${clusterName}'
-  }
-}

@@ -142,11 +142,15 @@ service waagent onestatus >/dev/null 2>&1 || service waagent start
 HOOK
 chmod 755 /usr/local/etc/rc.syshook.d/start/21-opnazure-platform
 
+# Planned maintenance checks the original image only on first successful boot.
+# Later manual upgrades may legitimately change both version numbers.
+if [ "$HA_ENABLED" = yes ]; then touch "$WORK/manual-maintenance"; fi
 cat > /usr/local/etc/rc.syshook.d/start/95-opnazure-verify <<'HOOK'
 #!/bin/sh
 set -eu
 exec >> /var/log/opnazure-firstboot.log 2>&1
 WORK=/var/db/opnazure
+if [ -f "$WORK/manual-maintenance" ] && [ -f "$WORK/first-boot-complete" ]; then exit 0; fi
 printf 'verifying-first-boot\n' > "$WORK/status"
 trap 'printf "first-boot-failed\n" > /var/db/opnazure/status' EXIT
 # Retry on a later boot if renewal fails; do not remove the marker prematurely.
@@ -160,17 +164,6 @@ date -u > "$WORK/first-boot-complete"
 trap - EXIT
 HOOK
 chmod 755 /usr/local/etc/rc.syshook.d/start/95-opnazure-verify
-
-# HA is optional; existing scenarios retain their original bootstrap.
-HA_ENABLED=$("$PYTHON" -c 'import json,sys; print("yes" if json.load(open(sys.argv[1])).get("ha") else "no")' "$WORK/settings.json")
-if [ "$HA_ENABLED" = yes ]; then
-    stage installing-active-backup
-    mkdir -p "$WORK/ha"
-    for file in agent.py install.py; do
-        fetch_file "${SCRIPT_URI}ha/$file" "$WORK/ha/$file"
-    done
-    /usr/local/bin/python3 "$WORK/ha/install.py" "$WORK/settings.json" "$WORK/ha/agent.py"
-fi
 
 stage checking-installed-packages
 OPN_VERSION=$(pkg query '%v' opnsense)

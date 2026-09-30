@@ -1,7 +1,8 @@
-> **New standalone Active-Backup template:** [deployment and failover guide](docs/active-backup.md).
+> **Manual Active-Backup for planned upgrades:** [deployment and maintenance guide](docs/active-backup.md).
 > Load [`ARM/active-backup.json`](ARM/active-backup.json) in Azure Custom Deployment.
-> Scripts are embedded; no published branch is required. Local validation only;
-> real Azure failover remains to be tested. Existing buttons below deploy the original scenarios.
+> Primary starts selected; Secondary stays isolated and manageable. No automatic failover.
+> Scripts are embedded. Local validation only; real Azure handover remains to be tested.
+> Existing buttons below deploy the original scenarios.
 
 # OPNsense 26.7 on Azure — TwoNics and Active-Active
 

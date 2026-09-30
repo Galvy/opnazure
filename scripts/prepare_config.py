@@ -37,6 +37,11 @@ def validate(settings):
                 raise ValueError("pfsync addresses must be assignable hosts in the trusted Azure subnet")
         if local == peer:
             raise ValueError("pfsync peer must be a different node")
+    if settings.get("ha"):
+        if (settings["role"] not in ("Primary", "Secondary") or
+                settings["ha"].get("mode") != "manual" or
+                settings["ha"].get("node") != settings["role"]):
+            raise ValueError("Active-backup requires manual mode and a matching node role")
     return settings
 
 
@@ -67,18 +72,6 @@ def render_config(source, settings):
         ET.SubElement(system, "dnsserver").text = "168.63.129.16"
         if system.find("dnslocalhost") is None:
             ET.SubElement(system, "dnslocalhost").text = "1"
-        for iface in ("wan", "lan"):
-            rule = ET.SubElement(root.find("filter"), "rule")
-            for tag, value in (("type", "pass"), ("interface", iface), ("ipprotocol", "inet"),
-                               ("protocol", "tcp"), ("descr", "Azure HA role probe"),
-                               ("statetype", "keep state")):
-                ET.SubElement(rule, tag).text = value
-            ET.SubElement(ET.SubElement(rule, "source"), "address").text = "168.63.129.16"
-            destination = ET.SubElement(rule, "destination")
-            ET.SubElement(destination, "network").text = iface + "ip"
-            ET.SubElement(destination, "port").text = "8080"
-            if iface == "lan":
-                ET.SubElement(rule, "reply-to").text = "LAN_GW"
     elif role != "TwoNics":
         root.find("system/hostname").text = f"OPNsense-{role}"
         ha = root.find("hasync")

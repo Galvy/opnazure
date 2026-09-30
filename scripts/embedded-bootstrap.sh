@@ -7,7 +7,6 @@ export OPNAZURE_SOURCE
 cleanup() { rm -rf "$OPNAZURE_SOURCE"; }
 trap cleanup EXIT
 trap "exit 1" HUP INT TERM
-mkdir -p "$OPNAZURE_SOURCE/ha"
 PYTHON=
 for candidate in /usr/local/bin/python3 /usr/local/bin/python3.[0-9]*; do
     if [ -x "$candidate" ] && "$candidate" -c "import base64,json,pathlib"; then
