@@ -15,8 +15,14 @@ manual handover or VPN connectivity test has been performed for this variant.
 
 ## Deploy
 
-Use a **new test resource group** and load `ARM/active-backup.json` through Azure
-Portal: **Deploy a custom template → Build your own template in the editor → Load
+Use the **Deploy Active-Backup** button at the top of this branch's README:
+
+[![Deploy Active-Backup to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.json)
+
+It opens Azure's standard parameter form directly for Active-Backup. There is no
+**OPNSense Scenario** selector. Use a **new test resource group**.
+
+Alternatively, load `ARM/active-backup.json` through Azure Portal: **Deploy a custom template → Build your own template in the editor → Load
 file**. Existing `ARM/main.json` buttons still deploy TwoNics/Active-Active.
 
 The ARM file embeds the fork's scripts. It works without publishing the branch or

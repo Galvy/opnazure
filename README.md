@@ -1,10 +1,28 @@
-> **Manual Active-Backup for planned upgrades:** [deployment and maintenance guide](docs/active-backup.md).
-> Load [`ARM/active-backup.json`](ARM/active-backup.json) in Azure Custom Deployment.
-> Primary starts selected; Secondary stays isolated and manageable. No automatic failover.
-> Scripts are embedded. Local validation only; real Azure handover remains to be tested.
-> Existing buttons below deploy the original scenarios.
+# OPNsense on Azure — manual Active-Backup
 
-# OPNsense 26.7 on Azure — TwoNics and Active-Active
+## Deploy Active-Backup for planned upgrades
+
+[![Deploy Active-Backup to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.json)
+
+**Use this button for the new manual Active-Backup template.** It loads
+`ARM/active-backup.json` from `Galvy/opnazure`, branch
+`feature/active-backup-vpn-site`, using Azure's standard parameter form.
+There is no **OPNSense Scenario** selector: this template deploys only Active-Backup.
+If you see that selector, you have opened the older deployment form.
+
+Primary starts selected; Secondary stays isolated and manageable. There is no
+automatic failover. Configure VPNs and business routing manually after deployment.
+Use a **new test resource group**. Enter your management public IPv4 CIDR and a
+bootstrap administrator password; adjust the infrastructure CIDRs as needed.
+
+See the [deployment and maintenance guide](docs/active-backup.md).
+Scripts are embedded. Local validation is complete; real Azure handover remains
+to be tested. Opening the button does not deploy resources until you submit the form.
+
+## Existing TwoNics and Active-Active templates
+
+The separate button below retains the existing two-scenario form and its original
+update branch. It does **not** deploy the manual Active-Backup template.
 
 This branch of [Galvy/opnazure](https://github.com/Galvy/opnazure/tree/update/freebsd15-opnsense26.7)
 prepares a fresh **FreeBSD 15.1 AMD64 Gen2 ZFS VM → latest OPNsense 26.7 maintenance release**.
@@ -18,7 +36,7 @@ Choose **TwoNics** (one VM) or **Active-Active** (two VMs with Azure Standard lo
 The active-active architecture follows the original project, with reciprocal unicast pfsync peers.
 It is not active-backup, and it does not configure an OpenVPN server or replicate OpenVPN sessions.
 
-## Deploy this fork and branch
+### Deploy TwoNics or Active-Active (separate template)
 
 [![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Fupdate%2Ffreebsd15-opnsense26.7%2FARM%2Fmain.json/uiFormDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Fupdate%2Ffreebsd15-opnsense26.7%2FARM%2FuiFormDefinition.json)
 
@@ -52,6 +70,7 @@ secret is needed for a portal deployment; Azure uses your signed-in account.
 |---|---|---|---|
 | TwoNics | One, WAN + LAN | Public IP on WAN; HTTPS 443 | VM's trusted NIC IP |
 | Active-Active | Two, each WAN + LAN; shared availability set | Public Standard LB; management NAT 50443/50444 → 443 | Internal Standard LB frontend IP |
+| Active-Backup (dedicated button at top) | Two, manual selection for planned upgrades | UDP VPN publication; management NAT 50443/50444 → 443 | Internal Standard LB frontend IP |
 
 Active-active restores the original public TCP 3389 floating-IP example rule, the explicit
 outbound SNAT rule, internal HA-ports rule and TCP 443 probes. The example inbound service
