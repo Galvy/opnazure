@@ -1,7 +1,7 @@
 name: OPNsense deployment validation
 on:
   push:
-    branches: ['update/freebsd15-opnsense26.7']
+    branches: ['update/freebsd15-opnsense26.7', 'feature/active-backup-vpn-site']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -19,12 +19,15 @@ jobs:
         run: |
           "$RUNNER_TEMP/bicep" build bicep/main.bicep --outfile "$RUNNER_TEMP/main.json"
           cmp ARM/main.json "$RUNNER_TEMP/main.json"
+          "$RUNNER_TEMP/bicep" build bicep/active-backup.bicep --outfile "$RUNNER_TEMP/active-backup.json"
+          cmp ARM/active-backup.json "$RUNNER_TEMP/active-backup.json"
           cmp bicep/main.parameters.json ARM/main.parameters.json
           cmp bicep/uiFormDefinition.json ARM/uiFormDefinition.json
       - name: Check shell scripts and provisioning regressions
         run: |
+          sh -n scripts/embedded-bootstrap.sh
           sh -n scripts/launch-bootstrap.sh
           sh -n scripts/configureopnsense.sh
           sh -n scripts/verify_opnsense.sh
-          shellcheck scripts/launch-bootstrap.sh scripts/configureopnsense.sh scripts/verify_opnsense.sh
+          shellcheck scripts/embedded-bootstrap.sh scripts/launch-bootstrap.sh scripts/configureopnsense.sh scripts/verify_opnsense.sh
           python3 -m unittest discover -s tests -v

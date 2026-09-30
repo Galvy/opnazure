@@ -1,0 +1,2257 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.47.16.16243",
+      "templateHash": "10479835283106344399"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]"
+    },
+    "clusterName": {
+      "type": "string",
+      "defaultValue": "opn-vpn",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "virtualMachineSize": {
+      "type": "string",
+      "defaultValue": "Standard_B2s",
+      "metadata": {
+        "description": "A VM SKU supporting two NICs, available in the selected region."
+      }
+    },
+    "vnetCIDR": {
+      "type": "string",
+      "defaultValue": "10.80.0.0/16"
+    },
+    "wanSubnetCIDR": {
+      "type": "string",
+      "defaultValue": "10.80.0.0/24"
+    },
+    "trustedTransitCIDR": {
+      "type": "string",
+      "defaultValue": "10.80.1.0/24"
+    },
+    "serversSubnetCIDR": {
+      "type": "string",
+      "defaultValue": "10.80.2.0/24"
+    },
+    "managementSourceCIDR": {
+      "type": "string",
+      "minLength": 9,
+      "metadata": {
+        "description": "Public IPv4 CIDR permitted to manage the two firewalls. Required."
+      }
+    },
+    "bootstrapAdminPassword": {
+      "type": "securestring",
+      "minLength": 12,
+      "metadata": {
+        "description": "Temporary Azure image administrator password; OPNsense uses its initial root credentials after conversion."
+      }
+    },
+    "imageVersion": {
+      "type": "string",
+      "defaultValue": "latest"
+    },
+    "scriptURI": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/Galvy/opnazure/feature/active-backup-vpn-site/scripts/",
+      "metadata": {
+        "description": "Source provenance; this template embeds all fork bootstrap artifacts. No raw GitHub download is needed for these files."
+      }
+    },
+    "openVpnPort": {
+      "type": "int",
+      "defaultValue": 1194,
+      "minValue": 1024,
+      "maxValue": 65535
+    },
+    "wireGuardPort": {
+      "type": "int",
+      "defaultValue": 51820,
+      "minValue": 1024,
+      "maxValue": 65535
+    }
+  },
+  "variables": {
+    "vnetName": "[format('{0}-VNet', parameters('clusterName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-network', parameters('clusterName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "vnetName": {
+            "value": "[variables('vnetName')]"
+          },
+          "vnetAddressSpace": {
+            "value": [
+              "[parameters('vnetCIDR')]"
+            ]
+          },
+          "subnets": {
+            "value": [
+              {
+                "name": "WAN",
+                "properties": {
+                  "addressPrefix": "[parameters('wanSubnetCIDR')]"
+                }
+              },
+              {
+                "name": "Trusted-Transit",
+                "properties": {
+                  "addressPrefix": "[parameters('trustedTransitCIDR')]"
+                }
+              },
+              {
+                "name": "Trusted-Servers",
+                "properties": {
+                  "addressPrefix": "[parameters('serversSubnetCIDR')]"
+                }
+              }
+            ]
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "8875239107211122938"
+            }
+          },
+          "parameters": {
+            "vnetAddressSpace": {
+              "type": "array"
+            },
+            "vnetName": {
+              "type": "string"
+            },
+            "subnets": {
+              "type": "array"
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('vnetName')]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": "[parameters('vnetAddressSpace')]"
+                },
+                "subnets": "[parameters('subnets')]"
+              }
+            }
+          ],
+          "outputs": {
+            "vnetId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName'))]"
+            },
+            "vnetName": {
+              "type": "string",
+              "value": "[parameters('vnetName')]"
+            },
+            "vnetSubnets": {
+              "type": "array",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', parameters('vnetName')), '2023-05-01').subnets]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-witness', parameters('clusterName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "clusterName": {
+            "value": "[parameters('clusterName')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "14356841139369481150"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "clusterName": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "accountName": "[format('opnha{0}', uniqueString(resourceGroup().id, parameters('clusterName')))]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Storage/storageAccounts",
+              "apiVersion": "2023-05-01",
+              "name": "[variables('accountName')]",
+              "location": "[parameters('location')]",
+              "kind": "StorageV2",
+              "sku": {
+                "name": "Standard_ZRS"
+              },
+              "properties": {
+                "minimumTlsVersion": "TLS1_2",
+                "supportsHttpsTrafficOnly": true,
+                "allowBlobPublicAccess": false,
+                "allowSharedKeyAccess": false
+              }
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}', variables('accountName'), 'default')]",
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('accountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}/{1}/{2}', variables('accountName'), 'default', 'witness')]",
+              "properties": {
+                "publicAccess": "None"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('accountName'), 'default')]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "identities",
+                "count": "[length(createArray('Primary', 'Secondary'))]"
+              },
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])]",
+              "location": "[parameters('location')]"
+            },
+            {
+              "copy": {
+                "name": "storageRoles",
+                "count": "[length(createArray('Primary', 'Secondary'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('accountName'), 'default', 'witness')]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('accountName'), 'default', 'witness'), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])), 'blob-data-contributor')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])), '2023-01-31').principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', variables('accountName'), 'default', 'witness')]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]",
+                "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleDefinitions",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, parameters('clusterName'), 'opnazure-fence')]",
+              "properties": {
+                "roleName": "[format('OPNazure fencing {0}', uniqueString(resourceGroup().id, parameters('clusterName')))]",
+                "description": "Read power state, hard-stop only the assigned peer VM.",
+                "type": "CustomRole",
+                "assignableScopes": [
+                  "[resourceGroup().id]"
+                ],
+                "permissions": [
+                  {
+                    "actions": [
+                      "Microsoft.Compute/virtualMachines/read",
+                      "Microsoft.Compute/virtualMachines/instanceView/read",
+                      "Microsoft.Compute/virtualMachines/powerOff/action"
+                    ],
+                    "notActions": [],
+                    "dataActions": [],
+                    "notDataActions": []
+                  }
+                ]
+              }
+            }
+          ],
+          "outputs": {
+            "blobUrl": {
+              "type": "string",
+              "value": "[format('{0}witness/leader', reference(resourceId('Microsoft.Storage/storageAccounts', variables('accountName')), '2023-05-01').primaryEndpoints.blob)]"
+            },
+            "primaryIdentity": {
+              "type": "object",
+              "value": {
+                "id": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[0]))]",
+                "clientId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[0])), '2023-01-31').clientId]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[0])), '2023-01-31').principalId]"
+              }
+            },
+            "secondaryIdentity": {
+              "type": "object",
+              "value": {
+                "id": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[1]))]",
+                "clientId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[1])), '2023-01-31').clientId]",
+                "principalId": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-{1}-HA', parameters('clusterName'), createArray('Primary', 'Secondary')[1])), '2023-01-31').principalId]"
+              }
+            },
+            "fenceRoleId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'opnazure-fence'))]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-gates', parameters('clusterName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "clusterName": {
+            "value": "[parameters('clusterName')]"
+          },
+          "managementSourceCIDR": {
+            "value": "[parameters('managementSourceCIDR')]"
+          },
+          "trustedSubnetCIDR": {
+            "value": "[parameters('trustedTransitCIDR')]"
+          },
+          "identities": {
+            "value": [
+              "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.primaryIdentity.value]",
+              "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.secondaryIdentity.value]"
+            ]
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "8212308641813427672"
+            }
+          },
+          "parameters": {
+            "location": {
+              "type": "string"
+            },
+            "clusterName": {
+              "type": "string"
+            },
+            "managementSourceCIDR": {
+              "type": "string"
+            },
+            "trustedSubnetCIDR": {
+              "type": "string"
+            },
+            "identities": {
+              "type": "array"
+            }
+          },
+          "variables": {
+            "copy": [
+              {
+                "name": "workloadRules",
+                "count": "[length(createArray('Inbound', 'Outbound'))]",
+                "input": {
+                  "name": "[format('Workload-{0}', createArray('Inbound', 'Outbound')[copyIndex('workloadRules')])]",
+                  "properties": {
+                    "priority": 200,
+                    "direction": "[createArray('Inbound', 'Outbound')[copyIndex('workloadRules')]]",
+                    "access": "Deny",
+                    "protocol": "*",
+                    "sourceAddressPrefix": "*",
+                    "sourcePortRange": "*",
+                    "destinationAddressPrefix": "*",
+                    "destinationPortRange": "*"
+                  }
+                }
+              }
+            ],
+            "controlRules": [
+              {
+                "name": "Deny-Public-Management",
+                "properties": {
+                  "priority": 130,
+                  "direction": "Inbound",
+                  "access": "Deny",
+                  "protocol": "Tcp",
+                  "sourceAddressPrefix": "Internet",
+                  "sourcePortRange": "*",
+                  "destinationAddressPrefix": "*",
+                  "destinationPortRanges": [
+                    "22",
+                    "443"
+                  ]
+                }
+              },
+              {
+                "name": "Management",
+                "properties": {
+                  "priority": 100,
+                  "direction": "Inbound",
+                  "access": "Allow",
+                  "protocol": "Tcp",
+                  "sourceAddressPrefix": "[parameters('managementSourceCIDR')]",
+                  "sourcePortRange": "*",
+                  "destinationAddressPrefix": "*",
+                  "destinationPortRanges": [
+                    "22",
+                    "443"
+                  ]
+                }
+              },
+              {
+                "name": "Peer-Management",
+                "properties": {
+                  "priority": 110,
+                  "direction": "Inbound",
+                  "access": "Allow",
+                  "protocol": "Tcp",
+                  "sourceAddressPrefix": "[parameters('trustedSubnetCIDR')]",
+                  "sourcePortRange": "*",
+                  "destinationAddressPrefix": "*",
+                  "destinationPortRange": "443"
+                }
+              },
+              {
+                "name": "Role-Probe",
+                "properties": {
+                  "priority": 120,
+                  "direction": "Inbound",
+                  "access": "Allow",
+                  "protocol": "Tcp",
+                  "sourceAddressPrefix": "AzureLoadBalancer",
+                  "sourcePortRange": "*",
+                  "destinationAddressPrefix": "*",
+                  "destinationPortRange": "8080"
+                }
+              },
+              {
+                "name": "Control-HTTPS",
+                "properties": {
+                  "priority": 100,
+                  "direction": "Outbound",
+                  "access": "Allow",
+                  "protocol": "Tcp",
+                  "sourceAddressPrefix": "*",
+                  "sourcePortRange": "*",
+                  "destinationAddressPrefix": "*",
+                  "destinationPortRanges": [
+                    "80",
+                    "443"
+                  ]
+                }
+              },
+              {
+                "name": "Azure-Platform",
+                "properties": {
+                  "priority": 110,
+                  "direction": "Outbound",
+                  "access": "Allow",
+                  "protocol": "*",
+                  "sourceAddressPrefix": "*",
+                  "sourcePortRange": "*",
+                  "destinationAddressPrefixes": [
+                    "168.63.129.16",
+                    "169.254.169.254"
+                  ],
+                  "destinationPortRange": "*"
+                }
+              },
+              {
+                "name": "Time",
+                "properties": {
+                  "priority": 120,
+                  "direction": "Outbound",
+                  "access": "Allow",
+                  "protocol": "Udp",
+                  "sourceAddressPrefix": "*",
+                  "sourcePortRange": "*",
+                  "destinationAddressPrefix": "*",
+                  "destinationPortRange": "123"
+                }
+              }
+            ]
+          },
+          "resources": [
+            {
+              "copy": {
+                "name": "gates",
+                "count": "[length(createArray('Primary', 'Secondary'))]"
+              },
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-05-01",
+              "name": "[format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])]",
+              "location": "[parameters('location')]",
+              "properties": {
+                "securityRules": "[concat(variables('controlRules'), variables('workloadRules'))]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleDefinitions",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceGroup().id, parameters('clusterName'), 'ha-gates')]",
+              "properties": {
+                "roleName": "[format('OPNazure gates {0}', uniqueString(resourceGroup().id, parameters('clusterName')))]",
+                "type": "CustomRole",
+                "assignableScopes": [
+                  "[resourceGroup().id]"
+                ],
+                "permissions": [
+                  {
+                    "actions": [
+                      "Microsoft.Network/networkSecurityGroups/read",
+                      "Microsoft.Network/networkSecurityGroups/securityRules/read",
+                      "Microsoft.Network/networkSecurityGroups/securityRules/write"
+                    ],
+                    "notActions": [],
+                    "dataActions": [],
+                    "notDataActions": []
+                  }
+                ]
+              }
+            },
+            {
+              "copy": {
+                "name": "primaryAccess",
+                "count": "[length(createArray('Primary', 'Secondary'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]",
+              "name": "[guid(resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])), parameters('identities')[0].principalId, resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'ha-gates')))]",
+              "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'ha-gates'))]",
+                "principalId": "[parameters('identities')[0].principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'ha-gates'))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "secondaryAccess",
+                "count": "[length(createArray('Primary', 'Secondary'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]",
+              "name": "[guid(resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()])), parameters('identities')[1].principalId, resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'ha-gates')))]",
+              "properties": {
+                "roleDefinitionId": "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'ha-gates'))]",
+                "principalId": "[parameters('identities')[1].principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Authorization/roleDefinitions', guid(resourceGroup().id, parameters('clusterName'), 'ha-gates'))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[copyIndex()]))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "ids": {
+              "type": "array",
+              "copy": {
+                "count": "[length(range(0, 2))]",
+                "input": "[resourceId('Microsoft.Network/networkSecurityGroups', format('{0}-{1}-Gate', parameters('clusterName'), createArray('Primary', 'Secondary')[range(0, 2)[copyIndex()]]))]"
+              }
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-public-ip', parameters('clusterName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "publicipName": {
+            "value": "[format('{0}-PublicIP', parameters('clusterName'))]"
+          },
+          "publicipsku": {
+            "value": {
+              "name": "Standard",
+              "tier": "Regional"
+            }
+          },
+          "publicipproperties": {
+            "value": {
+              "publicIPAllocationMethod": "Static"
+            }
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "12725009938471022116"
+            }
+          },
+          "parameters": {
+            "publicipName": {
+              "type": "string"
+            },
+            "publicipsku": {
+              "type": "object"
+            },
+            "publicipproperties": {
+              "type": "object"
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/publicIPAddresses",
+              "apiVersion": "2023-05-01",
+              "name": "[parameters('publicipName')]",
+              "location": "[parameters('location')]",
+              "sku": "[parameters('publicipsku')]",
+              "properties": "[parameters('publicipproperties')]"
+            }
+          ],
+          "outputs": {
+            "publicipId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/publicIPAddresses', parameters('publicipName'))]"
+            },
+            "publicipAddress": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', parameters('publicipName')), '2023-05-01').ipAddress]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-pair', parameters('clusterName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "Location": {
+            "value": "[parameters('location')]"
+          },
+          "virtualMachineName": {
+            "value": "[parameters('clusterName')]"
+          },
+          "virtualMachineSize": {
+            "value": "[parameters('virtualMachineSize')]"
+          },
+          "untrustedSubnetId": {
+            "value": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'WAN')]"
+          },
+          "trustedSubnetId": {
+            "value": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'Trusted-Transit')]"
+          },
+          "trustedSubnetName": {
+            "value": "[format('{0}/Trusted-Transit', variables('vnetName'))]"
+          },
+          "publicIPId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-public-ip', parameters('clusterName'))), '2025-04-01').outputs.publicipId.value]"
+          },
+          "publicIPAddress": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-public-ip', parameters('clusterName'))), '2025-04-01').outputs.publicipAddress.value]"
+          },
+          "nsgIds": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-gates', parameters('clusterName'))), '2025-04-01').outputs.ids.value]"
+          },
+          "identities": {
+            "value": [
+              "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.primaryIdentity.value]",
+              "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.secondaryIdentity.value]"
+            ]
+          },
+          "witnessBlobUrl": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.blobUrl.value]"
+          },
+          "TempUsername": {
+            "value": "azureuser"
+          },
+          "TempPassword": {
+            "value": "[parameters('bootstrapAdminPassword')]"
+          },
+          "FreeBSDImageVersion": {
+            "value": "[parameters('imageVersion')]"
+          },
+          "OpnScriptURI": {
+            "value": "[parameters('scriptURI')]"
+          },
+          "OpnVersion": {
+            "value": "26.7"
+          },
+          "WALinuxVersion": {
+            "value": "2.15.0.1"
+          },
+          "openVpnPort": {
+            "value": "[parameters('openVpnPort')]"
+          },
+          "wireGuardPort": {
+            "value": "[parameters('wireGuardPort')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "12899944303991143040"
+            }
+          },
+          "parameters": {
+            "Location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]"
+            },
+            "virtualMachineName": {
+              "type": "string"
+            },
+            "virtualMachineSize": {
+              "type": "string"
+            },
+            "untrustedSubnetId": {
+              "type": "string"
+            },
+            "trustedSubnetId": {
+              "type": "string"
+            },
+            "trustedSubnetName": {
+              "type": "string"
+            },
+            "windowsSubnetName": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "publicIPId": {
+              "type": "string"
+            },
+            "publicIPAddress": {
+              "type": "string"
+            },
+            "nsgIds": {
+              "type": "array"
+            },
+            "identities": {
+              "type": "array"
+            },
+            "witnessBlobUrl": {
+              "type": "string"
+            },
+            "openVpnPort": {
+              "type": "int",
+              "defaultValue": 1194,
+              "minValue": 1024,
+              "maxValue": 65535
+            },
+            "wireGuardPort": {
+              "type": "int",
+              "defaultValue": 51820,
+              "minValue": 1024,
+              "maxValue": 65535
+            },
+            "TempUsername": {
+              "type": "string"
+            },
+            "TempPassword": {
+              "type": "securestring"
+            },
+            "FreeBSDImageVersion": {
+              "type": "string"
+            },
+            "OpnScriptURI": {
+              "type": "string"
+            },
+            "OpnVersion": {
+              "type": "string"
+            },
+            "WALinuxVersion": {
+              "type": "string"
+            }
+          },
+          "variables": {
+            "externalLoadBalanceName": "[format('{0}-External-LB', parameters('virtualMachineName'))]",
+            "externalLoadBalanceFIPConfName": "FW",
+            "externalLoadBalanceBAPName": "OPNSense",
+            "externalLoadBalanceProbeName": "HTTPs",
+            "vpnPorts": [
+              500,
+              4500,
+              "[parameters('openVpnPort')]",
+              "[parameters('wireGuardPort')]"
+            ],
+            "externalLoadBalanceOutRuleName": "OutBound-OPNSense",
+            "internalLoadBalanceName": "[format('{0}-Internal-LB', parameters('virtualMachineName'))]",
+            "internalLoadBalanceFIPConfName": "FW",
+            "internalLoadBalanceBAPName": "OPNSense",
+            "internalLoadBalanceProbeName": "HTTPs",
+            "internalLoadBalancingRuleName": "Internal-HA-Port-Rule",
+            "externalLoadBalanceNatRuleName1": "primary-nva-mgmt",
+            "externalLoadBalanceNatRuleName2": "scondary-nva-mgmt",
+            "roles": [
+              "Primary",
+              "Secondary"
+            ]
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Compute/availabilitySets",
+              "apiVersion": "2023-07-01",
+              "name": "[format('{0}-AvailabilitySet', parameters('virtualMachineName'))]",
+              "location": "[parameters('Location')]",
+              "sku": {
+                "name": "Aligned"
+              },
+              "properties": {
+                "platformFaultDomainCount": 2,
+                "platformUpdateDomainCount": 2
+              }
+            },
+            {
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "[variables('externalLoadBalanceName')]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "Location": {
+                    "value": "[parameters('Location')]"
+                  },
+                  "lbName": {
+                    "value": "[variables('externalLoadBalanceName')]"
+                  },
+                  "frontendIPConfigurations": {
+                    "value": [
+                      {
+                        "name": "[variables('externalLoadBalanceFIPConfName')]",
+                        "properties": {
+                          "publicIPAddress": {
+                            "id": "[parameters('publicIPId')]"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "backendAddressPools": {
+                    "value": [
+                      {
+                        "name": "[variables('externalLoadBalanceBAPName')]"
+                      }
+                    ]
+                  },
+                  "loadBalancingRules": {
+                    "copy": [
+                      {
+                        "name": "value",
+                        "count": "[length(variables('vpnPorts'))]",
+                        "input": "[createObject('name', format('VPN-UDP-{0}', variables('vpnPorts')[copyIndex('value')]), 'properties', createObject('frontendPort', variables('vpnPorts')[copyIndex('value')], 'backendPort', variables('vpnPorts')[copyIndex('value')], 'enableFloatingIP', false(), 'protocol', 'Udp', 'frontendIPConfiguration', createObject('id', resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('externalLoadBalanceName'), variables('externalLoadBalanceFIPConfName'))), 'disableOutboundSnat', true(), 'backendAddressPool', createObject('id', resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('externalLoadBalanceName'), variables('externalLoadBalanceBAPName'))), 'probe', createObject('id', resourceId('Microsoft.Network/loadBalancers/probes', variables('externalLoadBalanceName'), variables('externalLoadBalanceProbeName')))))]"
+                      }
+                    ]
+                  },
+                  "inboundNatRules": {
+                    "value": [
+                      {
+                        "name": "[variables('externalLoadBalanceNatRuleName1')]",
+                        "properties": {
+                          "frontendPort": 50443,
+                          "backendPort": 443,
+                          "protocol": "Tcp",
+                          "frontendIPConfiguration": {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('externalLoadBalanceName'), variables('externalLoadBalanceFIPConfName'))]"
+                          }
+                        }
+                      },
+                      {
+                        "name": "[variables('externalLoadBalanceNatRuleName2')]",
+                        "properties": {
+                          "frontendPort": 50444,
+                          "backendPort": 443,
+                          "protocol": "Tcp",
+                          "frontendIPConfiguration": {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('externalLoadBalanceName'), variables('externalLoadBalanceFIPConfName'))]"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "probe": {
+                    "value": [
+                      {
+                        "name": "[variables('externalLoadBalanceProbeName')]",
+                        "properties": {
+                          "port": 8080,
+                          "protocol": "Http",
+                          "requestPath": "/health",
+                          "intervalInSeconds": 5,
+                          "numberOfProbes": 2
+                        }
+                      }
+                    ]
+                  },
+                  "outboundRules": {
+                    "value": [
+                      {
+                        "name": "[variables('externalLoadBalanceOutRuleName')]",
+                        "properties": {
+                          "allocatedOutboundPorts": 0,
+                          "idleTimeoutInMinutes": 4,
+                          "enableTcpReset": true,
+                          "backendAddressPool": {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('externalLoadBalanceName'), variables('externalLoadBalanceBAPName'))]"
+                          },
+                          "frontendIPConfigurations": [
+                            {
+                              "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('externalLoadBalanceName'), variables('externalLoadBalanceFIPConfName'))]"
+                            }
+                          ],
+                          "protocol": "All"
+                        }
+                      }
+                    ]
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.47.16.16243",
+                      "templateHash": "16680864936622746702"
+                    }
+                  },
+                  "parameters": {
+                    "lbName": {
+                      "type": "string"
+                    },
+                    "frontendIPConfigurations": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "backendAddressPools": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "loadBalancingRules": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "outboundRules": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "inboundNatRules": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "probe": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "Location": {
+                      "type": "string",
+                      "defaultValue": "[resourceGroup().location]"
+                    }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Network/loadBalancers",
+                      "apiVersion": "2023-05-01",
+                      "name": "[parameters('lbName')]",
+                      "location": "[parameters('Location')]",
+                      "sku": {
+                        "name": "Standard",
+                        "tier": "Regional"
+                      },
+                      "properties": {
+                        "frontendIPConfigurations": "[parameters('frontendIPConfigurations')]",
+                        "backendAddressPools": "[parameters('backendAddressPools')]",
+                        "loadBalancingRules": "[parameters('loadBalancingRules')]",
+                        "inboundNatRules": "[parameters('inboundNatRules')]",
+                        "probes": "[parameters('probe')]",
+                        "outboundRules": "[parameters('outboundRules')]"
+                      }
+                    }
+                  ],
+                  "outputs": {
+                    "backendAddressPools": {
+                      "type": "array",
+                      "value": "[reference(resourceId('Microsoft.Network/loadBalancers', parameters('lbName')), '2023-05-01').backendAddressPools]"
+                    },
+                    "frontendIP": {
+                      "type": "object",
+                      "value": "[reference(resourceId('Microsoft.Network/loadBalancers', parameters('lbName')), '2023-05-01').frontendIPConfigurations[0].properties]"
+                    },
+                    "inboundNatRules": {
+                      "type": "array",
+                      "value": "[reference(resourceId('Microsoft.Network/loadBalancers', parameters('lbName')), '2023-05-01').inboundNatRules]"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "[variables('internalLoadBalanceName')]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "Location": {
+                    "value": "[parameters('Location')]"
+                  },
+                  "lbName": {
+                    "value": "[variables('internalLoadBalanceName')]"
+                  },
+                  "frontendIPConfigurations": {
+                    "value": [
+                      {
+                        "name": "[variables('internalLoadBalanceFIPConfName')]",
+                        "properties": {
+                          "privateIPAllocationMethod": "Dynamic",
+                          "subnet": {
+                            "id": "[parameters('trustedSubnetId')]"
+                          },
+                          "privateIPAddressVersion": "IPv4"
+                        }
+                      }
+                    ]
+                  },
+                  "backendAddressPools": {
+                    "value": [
+                      {
+                        "name": "[variables('internalLoadBalanceBAPName')]"
+                      }
+                    ]
+                  },
+                  "loadBalancingRules": {
+                    "value": [
+                      {
+                        "name": "[variables('internalLoadBalancingRuleName')]",
+                        "properties": {
+                          "frontendPort": 0,
+                          "backendPort": 0,
+                          "protocol": "All",
+                          "frontendIPConfiguration": {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/frontendIPConfigurations', variables('internalLoadBalanceName'), variables('internalLoadBalanceFIPConfName'))]"
+                          },
+                          "disableOutboundSnat": true,
+                          "backendAddressPool": {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/backendAddressPools', variables('internalLoadBalanceName'), variables('internalLoadBalanceBAPName'))]"
+                          },
+                          "probe": {
+                            "id": "[resourceId('Microsoft.Network/loadBalancers/probes', variables('internalLoadBalanceName'), variables('internalLoadBalanceProbeName'))]"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  "probe": {
+                    "value": [
+                      {
+                        "name": "[variables('internalLoadBalanceProbeName')]",
+                        "properties": {
+                          "port": 8080,
+                          "protocol": "Http",
+                          "requestPath": "/health",
+                          "intervalInSeconds": 5,
+                          "numberOfProbes": 2
+                        }
+                      }
+                    ]
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.47.16.16243",
+                      "templateHash": "16680864936622746702"
+                    }
+                  },
+                  "parameters": {
+                    "lbName": {
+                      "type": "string"
+                    },
+                    "frontendIPConfigurations": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "backendAddressPools": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "loadBalancingRules": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "outboundRules": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "inboundNatRules": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "probe": {
+                      "type": "array",
+                      "defaultValue": []
+                    },
+                    "Location": {
+                      "type": "string",
+                      "defaultValue": "[resourceGroup().location]"
+                    }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Network/loadBalancers",
+                      "apiVersion": "2023-05-01",
+                      "name": "[parameters('lbName')]",
+                      "location": "[parameters('Location')]",
+                      "sku": {
+                        "name": "Standard",
+                        "tier": "Regional"
+                      },
+                      "properties": {
+                        "frontendIPConfigurations": "[parameters('frontendIPConfigurations')]",
+                        "backendAddressPools": "[parameters('backendAddressPools')]",
+                        "loadBalancingRules": "[parameters('loadBalancingRules')]",
+                        "inboundNatRules": "[parameters('inboundNatRules')]",
+                        "probes": "[parameters('probe')]",
+                        "outboundRules": "[parameters('outboundRules')]"
+                      }
+                    }
+                  ],
+                  "outputs": {
+                    "backendAddressPools": {
+                      "type": "array",
+                      "value": "[reference(resourceId('Microsoft.Network/loadBalancers', parameters('lbName')), '2023-05-01').backendAddressPools]"
+                    },
+                    "frontendIP": {
+                      "type": "object",
+                      "value": "[reference(resourceId('Microsoft.Network/loadBalancers', parameters('lbName')), '2023-05-01').frontendIPConfigurations[0].properties]"
+                    },
+                    "inboundNatRules": {
+                      "type": "array",
+                      "value": "[reference(resourceId('Microsoft.Network/loadBalancers', parameters('lbName')), '2023-05-01').inboundNatRules]"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "copy": {
+                "name": "wanNics",
+                "count": "[length(variables('roles'))]"
+              },
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "[format('{0}-{1}-Untrusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "Location": {
+                    "value": "[parameters('Location')]"
+                  },
+                  "nicName": {
+                    "value": "[format('{0}-{1}-Untrusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])]"
+                  },
+                  "subnetId": {
+                    "value": "[parameters('untrustedSubnetId')]"
+                  },
+                  "enableIPForwarding": {
+                    "value": true
+                  },
+                  "nsgId": {
+                    "value": "[parameters('nsgIds')[copyIndex()]]"
+                  },
+                  "loadBalancerBackendAddressPoolId": {
+                    "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id]"
+                  },
+                  "loadBalancerInboundNatRules": {
+                    "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName')), '2025-04-01').outputs.inboundNatRules.value[copyIndex()].id]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.47.16.16243",
+                      "templateHash": "1609907422693015414"
+                    }
+                  },
+                  "parameters": {
+                    "subnetId": {
+                      "type": "string"
+                    },
+                    "publicIPId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "enableIPForwarding": {
+                      "type": "bool",
+                      "defaultValue": false
+                    },
+                    "nicName": {
+                      "type": "string"
+                    },
+                    "nsgId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "loadBalancerBackendAddressPoolId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "loadBalancerInboundNatRules": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "Location": {
+                      "type": "string",
+                      "defaultValue": "[resourceGroup().location]"
+                    }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Network/networkInterfaces",
+                      "apiVersion": "2023-05-01",
+                      "name": "[parameters('nicName')]",
+                      "location": "[parameters('Location')]",
+                      "properties": {
+                        "enableIPForwarding": "[parameters('enableIPForwarding')]",
+                        "networkSecurityGroup": {
+                          "id": "[parameters('nsgId')]"
+                        },
+                        "ipConfigurations": [
+                          {
+                            "name": "ipconfig1",
+                            "properties": {
+                              "subnet": {
+                                "id": "[parameters('subnetId')]"
+                              },
+                              "privateIPAllocationMethod": "Dynamic",
+                              "publicIPAddress": "[if(not(empty(parameters('publicIPId'))), createObject('id', parameters('publicIPId')), null())]",
+                              "loadBalancerBackendAddressPools": "[if(not(empty(parameters('loadBalancerBackendAddressPoolId'))), createArray(createObject('id', parameters('loadBalancerBackendAddressPoolId'))), null())]",
+                              "loadBalancerInboundNatRules": "[if(not(empty(parameters('loadBalancerInboundNatRules'))), createArray(createObject('id', parameters('loadBalancerInboundNatRules'))), null())]"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "outputs": {
+                    "nicName": {
+                      "type": "string",
+                      "value": "[parameters('nicName')]"
+                    },
+                    "nicId": {
+                      "type": "string",
+                      "value": "[resourceId('Microsoft.Network/networkInterfaces', parameters('nicName'))]"
+                    },
+                    "nicIP": {
+                      "type": "string",
+                      "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].properties.privateIPAddress]"
+                    },
+                    "nicIpConfigurationId": {
+                      "type": "string",
+                      "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].id]"
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Resources/deployments', variables('externalLoadBalanceName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "lanNics",
+                "count": "[length(variables('roles'))]"
+              },
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "[format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "Location": {
+                    "value": "[parameters('Location')]"
+                  },
+                  "nicName": {
+                    "value": "[format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])]"
+                  },
+                  "subnetId": {
+                    "value": "[parameters('trustedSubnetId')]"
+                  },
+                  "enableIPForwarding": {
+                    "value": true
+                  },
+                  "nsgId": {
+                    "value": "[parameters('nsgIds')[copyIndex()]]"
+                  },
+                  "loadBalancerBackendAddressPoolId": {
+                    "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.backendAddressPools.value[0].id]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.47.16.16243",
+                      "templateHash": "1609907422693015414"
+                    }
+                  },
+                  "parameters": {
+                    "subnetId": {
+                      "type": "string"
+                    },
+                    "publicIPId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "enableIPForwarding": {
+                      "type": "bool",
+                      "defaultValue": false
+                    },
+                    "nicName": {
+                      "type": "string"
+                    },
+                    "nsgId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "loadBalancerBackendAddressPoolId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "loadBalancerInboundNatRules": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "Location": {
+                      "type": "string",
+                      "defaultValue": "[resourceGroup().location]"
+                    }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Network/networkInterfaces",
+                      "apiVersion": "2023-05-01",
+                      "name": "[parameters('nicName')]",
+                      "location": "[parameters('Location')]",
+                      "properties": {
+                        "enableIPForwarding": "[parameters('enableIPForwarding')]",
+                        "networkSecurityGroup": {
+                          "id": "[parameters('nsgId')]"
+                        },
+                        "ipConfigurations": [
+                          {
+                            "name": "ipconfig1",
+                            "properties": {
+                              "subnet": {
+                                "id": "[parameters('subnetId')]"
+                              },
+                              "privateIPAllocationMethod": "Dynamic",
+                              "publicIPAddress": "[if(not(empty(parameters('publicIPId'))), createObject('id', parameters('publicIPId')), null())]",
+                              "loadBalancerBackendAddressPools": "[if(not(empty(parameters('loadBalancerBackendAddressPoolId'))), createArray(createObject('id', parameters('loadBalancerBackendAddressPoolId'))), null())]",
+                              "loadBalancerInboundNatRules": "[if(not(empty(parameters('loadBalancerInboundNatRules'))), createArray(createObject('id', parameters('loadBalancerInboundNatRules'))), null())]"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  ],
+                  "outputs": {
+                    "nicName": {
+                      "type": "string",
+                      "value": "[parameters('nicName')]"
+                    },
+                    "nicId": {
+                      "type": "string",
+                      "value": "[resourceId('Microsoft.Network/networkInterfaces', parameters('nicName'))]"
+                    },
+                    "nicIP": {
+                      "type": "string",
+                      "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].properties.privateIPAddress]"
+                    },
+                    "nicIpConfigurationId": {
+                      "type": "string",
+                      "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].id]"
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "nodes",
+                "count": "[length(variables('roles'))]"
+              },
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2025-04-01",
+              "name": "[format('{0}-{1}', parameters('virtualMachineName'), variables('roles')[copyIndex()])]",
+              "properties": {
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "mode": "Incremental",
+                "parameters": {
+                  "Location": {
+                    "value": "[parameters('Location')]"
+                  },
+                  "virtualMachineName": {
+                    "value": "[format('{0}-{1}', parameters('virtualMachineName'), variables('roles')[copyIndex()])]"
+                  },
+                  "virtualMachineSize": {
+                    "value": "[parameters('virtualMachineSize')]"
+                  },
+                  "untrustedSubnetId": {
+                    "value": "[parameters('untrustedSubnetId')]"
+                  },
+                  "trustedSubnetId": {
+                    "value": "[parameters('trustedSubnetId')]"
+                  },
+                  "nsgId": {
+                    "value": "[parameters('nsgIds')[copyIndex()]]"
+                  },
+                  "TempUsername": {
+                    "value": "[parameters('TempUsername')]"
+                  },
+                  "TempPassword": {
+                    "value": "[parameters('TempPassword')]"
+                  },
+                  "FreeBSDImageVersion": {
+                    "value": "[parameters('FreeBSDImageVersion')]"
+                  },
+                  "availabilitySetId": {
+                    "value": "[resourceId('Microsoft.Compute/availabilitySets', format('{0}-AvailabilitySet', parameters('virtualMachineName')))]"
+                  },
+                  "managedIdentityId": {
+                    "value": "[parameters('identities')[copyIndex()].id]"
+                  },
+                  "haConfig": {
+                    "value": {
+                      "node": "[variables('roles')[copyIndex()]]",
+                      "client_id": "[parameters('identities')[copyIndex()].clientId]",
+                      "blob_url": "[parameters('witnessBlobUrl')]",
+                      "own_nsg_id": "[parameters('nsgIds')[copyIndex()]]",
+                      "peer_nsg_id": "[parameters('nsgIds')[sub(1, copyIndex())]]",
+                      "peer_vm_id": "[resourceId('Microsoft.Compute/virtualMachines', format('{0}-{1}', parameters('virtualMachineName'), variables('roles')[sub(1, copyIndex())]))]",
+                      "probe_port": 8080
+                    }
+                  },
+                  "providedNics": {
+                    "value": {
+                      "wanId": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Untrusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])), '2025-04-01').outputs.nicId.value]",
+                      "lanId": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])), '2025-04-01').outputs.nicId.value]",
+                      "wanIP": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Untrusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])), '2025-04-01').outputs.nicIP.value]",
+                      "lanIP": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])), '2025-04-01').outputs.nicIP.value]"
+                    }
+                  },
+                  "ShellScriptObj": {
+                    "value": {
+                      "OpnScriptURI": "[parameters('OpnScriptURI')]",
+                      "OpnVersion": "[parameters('OpnVersion')]",
+                      "WALinuxVersion": "[parameters('WALinuxVersion')]",
+                      "OpnType": "[variables('roles')[copyIndex()]]",
+                      "TrustedSubnetName": "[parameters('trustedSubnetName')]",
+                      "WindowsSubnetName": "[parameters('windowsSubnetName')]",
+                      "publicIPAddress": "[parameters('publicIPAddress')]",
+                      "localTrustedIP": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()])), '2025-04-01').outputs.nicIP.value]",
+                      "peerTrustedIP": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[sub(1, copyIndex())])), '2025-04-01').outputs.nicIP.value]"
+                    }
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "metadata": {
+                    "_generator": {
+                      "name": "bicep",
+                      "version": "0.47.16.16243",
+                      "templateHash": "18149734115877825267"
+                    }
+                  },
+                  "parameters": {
+                    "untrustedSubnetId": {
+                      "type": "string"
+                    },
+                    "trustedSubnetId": {
+                      "type": "string"
+                    },
+                    "publicIPId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "providedNics": {
+                      "type": "object",
+                      "defaultValue": {}
+                    },
+                    "availabilitySetId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "managedIdentityId": {
+                      "type": "string",
+                      "defaultValue": ""
+                    },
+                    "haConfig": {
+                      "type": "object",
+                      "defaultValue": {}
+                    },
+                    "virtualMachineName": {
+                      "type": "string"
+                    },
+                    "TempUsername": {
+                      "type": "string"
+                    },
+                    "TempPassword": {
+                      "type": "securestring"
+                    },
+                    "virtualMachineSize": {
+                      "type": "string"
+                    },
+                    "FreeBSDImageVersion": {
+                      "type": "string",
+                      "defaultValue": "latest"
+                    },
+                    "nsgId": {
+                      "type": "string"
+                    },
+                    "ShellScriptObj": {
+                      "type": "object"
+                    },
+                    "Location": {
+                      "type": "string",
+                      "defaultValue": "[resourceGroup().location]"
+                    }
+                  },
+                  "variables": {
+                    "$fxv#0": "IyEvYmluL3NoCiMgRnJlc2ggQXp1cmUgRnJlZUJTRCAxNS4xIC0+IE9QTnNlbnNlIDI2LjcuIE5ldmVyIHVzZSBhcyBhbiBpbi1wbGFjZSB1cGdyYWRlLgpzZXQgLWV1ClBBVEg9L3NiaW46L2JpbjovdXNyL3NiaW46L3Vzci9iaW46L3Vzci9sb2NhbC9zYmluOi91c3IvbG9jYWwvYmluCmV4cG9ydCBQQVRICnVtYXNrIDA3NwoKWyAiJChpZCAtdSkiID0gMCBdIHx8IHsgZWNobyAnTXVzdCBydW4gYXMgcm9vdCcgPiYyOyBleGl0IDE7IH0KWyAiJCh1bmFtZSAtcykiID0gRnJlZUJTRCBdIHx8IHsgZWNobyAnTXVzdCBydW4gb24gRnJlZUJTRCcgPiYyOyBleGl0IDE7IH0KWyAiJCMiID0gMSBdIHx8IHsgZWNobyAnRXhwZWN0ZWQgYmFzZTY0LWVuY29kZWQgSlNPTiBzZXR0aW5ncycgPiYyOyBleGl0IDE7IH0KCldPUks9L3Zhci9kYi9vcG5henVyZQpta2RpciAtcCAiJFdPUksiCiMgQSByZXRyeSBhZnRlciBjb252ZXJzaW9uIG11c3QgbmV2ZXIgZGVsZXRlIGFuIGluc3RhbGxlZCBmaXJld2FsbCdzIHBhY2thZ2VzL2NvbmZpZy4KaWYgWyAtZiAiJFdPUksvYm9vdHN0cmFwLWNvbXBsZXRlIiBdOyB0aGVuCiAgICBlY2hvICJCb290c3RyYXAgYWxyZWFkeSBjb21wbGV0ZWQuIFNlZSAkV09SSy9zdGF0dXMgYW5kIC92YXIvbG9nL29wbmF6dXJlLWJvb3RzdHJhcC5sb2cuIgogICAgZXhpdCAwCmZpCmlmIFsgLWYgIiRXT1JLL2NvbnZlcnNpb24tc3RhcnRlZCIgXSB8fCBbIC1mIC91c3IvbG9jYWwvb3Buc2Vuc2UvdmVyc2lvbi9jb3JlIF07IHRoZW4KICAgIGVjaG8gIlJlZnVzaW5nIHRvIHJlLWJvb3RzdHJhcCBhIGNvbnZlcnRlZC9wYXJ0aWFsbHkgY29udmVydGVkIFZNLiBJbnNwZWN0IGxvZ3M7IHVzZSBhIGZyZXNoIHRlc3QgVk0uIiA+JjIKICAgIGV4aXQgMQpmaQpjYXNlICIkKGZyZWVic2QtdmVyc2lvbiAtdSkiIGluCiAgICAxNS4xLVJFTEVBU0UqKSA7OwogICAgKikgZWNobyAnRXhwZWN0ZWQgYSBGcmVlQlNEIDE1LjEtUkVMRUFTRSBpbWFnZScgPiYyOyBleGl0IDEgOzsKZXNhYwpbICIkKHVuYW1lIC1wKSIgPSBhbWQ2NCBdIHx8IHsgZWNobyAnRXhwZWN0ZWQgYW1kNjQnID4mMjsgZXhpdCAxOyB9CmlmICEgbWtkaXIgIiRXT1JLL2xvY2siOyB0aGVuCiAgICBlY2hvICdBbm90aGVyIGJvb3RzdHJhcCBpcyBydW5uaW5nIChvciBhIHByZXZpb3VzIHJ1biB3YXMgaW50ZXJydXB0ZWQpLiBJbnNwZWN0IHRoZSBWTS4nID4mMgogICAgZXhpdCAxCmZpClNUQUdFPXByZWZsaWdodApjbGVhbnVwKCkgewogICAgcmVzdWx0PSQ/CiAgICB0cmFwIC0gRVhJVAogICAgaWYgWyAiJHJlc3VsdCIgLW5lIDAgXTsgdGhlbgogICAgICAgIHByaW50ZiAnZmFpbGVkOiAlcyAoZXhpdCAlcylcbicgIiRTVEFHRSIgIiRyZXN1bHQiID4gIiRXT1JLL3N0YXR1cyIKICAgICAgICBlY2hvICJFUlJPUiBkdXJpbmcgJFNUQUdFOyBubyBhdXRvbWF0aWMgcmV0cnkgb3IgcmVib290LiIKICAgIGZpCiAgICBybWRpciAiJFdPUksvbG9jayIKICAgIGV4aXQgIiRyZXN1bHQiCn0KdHJhcCBjbGVhbnVwIEVYSVQKdHJhcCAnZXhpdCAxJyBIVVAgSU5UIFRFUk0KcHJpbnRmICdQcm92aXNpb25pbmcgbG9nOiAvdmFyL2xvZy9vcG5henVyZS1ib290c3RyYXAubG9nXG4nCmV4ZWMgPj4gL3Zhci9sb2cvb3BuYXp1cmUtYm9vdHN0cmFwLmxvZyAyPiYxCmxvZygpIHsgcHJpbnRmICdbJXNdICVzXG4nICIkKGRhdGUgLXUgJyslWS0lbS0lZFQlSDolTTolU1onKSIgIiQqIjsgfQpzdGFnZSgpIHsgU1RBR0U9JDE7IHByaW50ZiAnJXNcbicgIiRTVEFHRSIgPiAiJFdPUksvc3RhdHVzIjsgbG9nICIkU1RBR0UiOyB9CmZldGNoX2ZpbGUoKSB7CiAgICB1cmw9JDEKICAgIHRhcmdldD0kMgogICAgIyBUaGUgc3RhbmRhbG9uZSBIQSB0ZW1wbGF0ZSBlbWJlZHMgaXRzIGFydGlmYWN0cy4gT25seSBleHRlcm5hbCB1cHN0cmVhbQogICAgIyBib290c3RyYXAvcGFja2FnZXMgYXJlIGRvd25sb2FkZWQ7IHJldGFpbiBVUkwgZmV0Y2hpbmcgZm9yIG9sZGVyIHNjZW5hcmlvcy4KICAgIGlmIFsgLW4gIiR7T1BOQVpVUkVfU09VUkNFOi19IiBdICYmIFsgLW4gIiR7U0NSSVBUX1VSSTotfSIgXTsgdGhlbgogICAgICAgIGNhc2UgIiR1cmwiIGluCiAgICAgICAgICAgICIkU0NSSVBUX1VSSSIqKQogICAgICAgICAgICAgICAgcmVsYXRpdmU9JHt1cmwjIiRTQ1JJUFRfVVJJIn0KICAgICAgICAgICAgICAgIGlmIFsgLWYgIiRPUE5BWlVSRV9TT1VSQ0UvJHJlbGF0aXZlIiBdOyB0aGVuCiAgICAgICAgICAgICAgICAgICAgY3AgIiRPUE5BWlVSRV9TT1VSQ0UvJHJlbGF0aXZlIiAiJHRhcmdldCIKICAgICAgICAgICAgICAgICAgICByZXR1cm4KICAgICAgICAgICAgICAgIGZpCiAgICAgICAgICAgICAgICA7OwogICAgICAgIGVzYWMKICAgIGZpCiAgICBhdHRlbXB0PTEKICAgIHdoaWxlICEgZmV0Y2ggLVQgNjAgLW8gIiR7dGFyZ2V0fS5kb3dubG9hZCIgIiR1cmwiOyBkbwogICAgICAgIHJtIC1mICIke3RhcmdldH0uZG93bmxvYWQiCiAgICAgICAgWyAiJGF0dGVtcHQiIC1sdCAzIF0gfHwgcmV0dXJuIDEKICAgICAgICBhdHRlbXB0PSQoKGF0dGVtcHQgKyAxKSkKICAgICAgICBzbGVlcCA1CiAgICBkb25lCiAgICBtdiAiJHt0YXJnZXR9LmRvd25sb2FkIiAiJHRhcmdldCIKfQoKc3RhZ2UgcHJlZmxpZ2h0ClBZVEhPTj0KZm9yIGNhbmRpZGF0ZSBpbiAvdXNyL2xvY2FsL2Jpbi9weXRob24zIC91c3IvbG9jYWwvYmluL3B5dGhvbjMuWzAtOV0qOyBkbwogICAgaWYgWyAteCAiJGNhbmRpZGF0ZSIgXSAmJiAiJGNhbmRpZGF0ZSIgLWMgJ2ltcG9ydCBqc29uLCBpcGFkZHJlc3MsIHhtbC5ldHJlZS5FbGVtZW50VHJlZScgMj4vZGV2L251bGw7IHRoZW4KICAgICAgICBQWVRIT049JGNhbmRpZGF0ZQogICAgICAgIGJyZWFrCiAgICBmaQpkb25lClsgLW4gIiRQWVRIT04iIF0gfHwgeyBsb2cgJ05vIHVzYWJsZSBQeXRob24gMyBpbiB0aGUgQXp1cmUgaW1hZ2UnOyBleGl0IDE7IH0KIyBEZWNvZGUgd2l0aG91dCBldmFsL3NvdXJjZSBvciBpbnRlcnBvbGF0aW5nIHVzZXIgaW5wdXQgaW50byBzaGVsbCBjb2RlLgoiJFBZVEhPTiIgLWMgJ2ltcG9ydCBiYXNlNjQsanNvbixzeXM7IHByaW50KGpzb24uZHVtcHMoanNvbi5sb2FkcyhiYXNlNjQuYjY0ZGVjb2RlKHN5cy5hcmd2WzFdLHZhbGlkYXRlPVRydWUpKSkpJyAiJDEiID4gIiRXT1JLL3NldHRpbmdzLmpzb24iClNDUklQVF9VUkk9JCgiJFBZVEhPTiIgLWMgJ2ltcG9ydCBqc29uLHJlLHN5czsgdT1qc29uLmxvYWQob3BlbihzeXMuYXJndlsxXSkpWyJzY3JpcHRVUkkiXTsgYXNzZXJ0IHJlLmZ1bGxtYXRjaChyImh0dHBzOi8vW0EtWmEtejAtOS5ffjovJSstXSsvIix1KSwgIkludmFsaWQgc2NyaXB0IFVSSSI7IHByaW50KHUpJyAiJFdPUksvc2V0dGluZ3MuanNvbiIpCkhBX0VOQUJMRUQ9JCgiJFBZVEhPTiIgLWMgJ2ltcG9ydCBqc29uLHN5czsgcHJpbnQoInllcyIgaWYganNvbi5sb2FkKG9wZW4oc3lzLmFyZ3ZbMV0pKS5nZXQoImhhIikgZWxzZSAibm8iKScgIiRXT1JLL3NldHRpbmdzLmpzb24iKQpDT05GSUdfRklMRVM9ImNvbmZpZy54bWwgY29uZmlnLWFjdGl2ZS1hY3RpdmUtcHJpbWFyeS54bWwgY29uZmlnLWFjdGl2ZS1hY3RpdmUtc2Vjb25kYXJ5LnhtbCIKaWYgWyAiJEhBX0VOQUJMRUQiID0geWVzIF07IHRoZW4gQ09ORklHX0ZJTEVTPWNvbmZpZy54bWw7IGZpCmZvciBmaWxlIGluICRDT05GSUdfRklMRVMgZ2V0X25pY19ndy5weSBwcmVwYXJlX2NvbmZpZy5weSBhY3Rpb25zX3dhYWdlbnQuY29uZiB2ZXJpZnlfb3Buc2Vuc2Uuc2g7IGRvCiAgICBmZXRjaF9maWxlICIke1NDUklQVF9VUkl9JHtmaWxlfSIgIiRXT1JLLyRmaWxlIgpkb25lCkJPT1RTVFJBUF9DT01NSVQ9ZGIwMThjMzVhYWM0NzAyMGM2OWRjNTA3YzNhZTY3YTMwZGJkZjJhYgpmZXRjaF9maWxlICJodHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vb3Buc2Vuc2UvdXBkYXRlLyR7Qk9PVFNUUkFQX0NPTU1JVH0vc3JjL2Jvb3RzdHJhcC9vcG5zZW5zZS1ib290c3RyYXAuc2guaW4iICIkV09SSy9ib290c3RyYXAudXBzdHJlYW0uc2giCiIkUFlUSE9OIiAiJFdPUksvcHJlcGFyZV9jb25maWcucHkiICIkV09SSyIKc2hhMjU2ICIkV09SSy9zZXR0aW5ncy5qc29uIiAiJFdPUksvY29uZmlnLnJlbmRlcmVkLnhtbCIgIiRXT1JLL3ByZXBhcmVfY29uZmlnLnB5IiAiJFdPUksvZ2V0X25pY19ndy5weSIgIiRXT1JLL2Jvb3RzdHJhcC51cHN0cmVhbS5zaCIgPiAiJFdPUksvaW5wdXQtY2hlY2tzdW1zLnR4dCIKQUdFTlRfTUlOSU1VTT0kKCIkUFlUSE9OIiAtYyAnaW1wb3J0IGpzb24sc3lzOyBwcmludChqc29uLmxvYWQob3BlbihzeXMuYXJndlsxXSkpWyJhZ2VudE1pbmltdW1WZXJzaW9uIl0pJyAiJFdPUksvc2V0dGluZ3MuanNvbiIpCiMgUmVjb3JkIHRoZSBpbWFnZSBzZWxlY3RlZCBieSBBenVyZSBpZiBJTURTIGlzIGF2YWlsYWJsZSwgd2l0aG91dCBxdWVyeWluZyBpZGVudGl0aWVzLgppZiBmZXRjaCAtVCAxMCAtSCAnTWV0YWRhdGE6IHRydWUnIC1vICIkV09SSy9pbWFnZS1tZXRhZGF0YS5qc29uIiAnaHR0cDovLzE2OS4yNTQuMTY5LjI1NC9tZXRhZGF0YS9pbnN0YW5jZS9jb21wdXRlL3N0b3JhZ2VQcm9maWxlL2ltYWdlUmVmZXJlbmNlP2FwaS12ZXJzaW9uPTIwMjEtMDItMDEmZm9ybWF0PWpzb24nOyB0aGVuCiAgICBsb2cgJ1JlY29yZGVkIGltYWdlIHJlZmVyZW5jZSBmcm9tIEF6dXJlIElNRFMnCmVsc2UKICAgIGxvZyAnSW1hZ2UgbWV0YWRhdGEgdW5hdmFpbGFibGU7IG9idGFpbiBleGFjdFZlcnNpb24gZnJvbSB0aGUgQXp1cmUgVk0gcmVzb3VyY2UnCmZpCgpzdGFnZSBjb252ZXJzaW9uCmNwICIkV09SSy9jb25maWcucmVuZGVyZWQueG1sIiAvdXNyL2xvY2FsL2V0Yy9jb25maWcueG1sCnRvdWNoICIkV09SSy9jb252ZXJzaW9uLXN0YXJ0ZWQiCiMgVGhlIHBpbm5lZCB1cHN0cmVhbSBzY3JpcHQgcmV0YWlucyBzZXQgLWUsIGluY2x1ZGluZyBpdHMgRnJlZUJTRCBwa2diYXNlIGhhbmRsaW5nLgojIE9ubHkgaXRzIGZpbmFsIHJlYm9vdCBpcyBzdXBwcmVzc2VkIGFuZCBpdHMgY29yZSBzb3VyY2UgaXMgcGlubmVkLgpzaCAiJFdPUksvYm9vdHN0cmFwLnNoIiAteSAtciAyNi43CgpzdGFnZSBhenVyZS1pbnRlZ3JhdGlvbgojIFVzZSB0aGUgRnJlZUJTRC1wb3J0IHBhY2thZ2UgKGNvcnJlY3Qgc2VydmljZSBwYXRocywgUHl0aG9uIGFuZCBkZXBlbmRlbmNpZXMpLgpwa2cgaW5zdGFsbCAteSBhenVyZS1hZ2VudCBiYXNoIG9zLWZycgpBR0VOVF9WRVJTSU9OPSQocGtnIHF1ZXJ5ICcldicgYXp1cmUtYWdlbnQpClsgIiQocGtnIHZlcnNpb24gLXQgIiRBR0VOVF9WRVJTSU9OIiAiJEFHRU5UX01JTklNVU0iKSIgIT0gJzwnIF0gfHwgewogICAgbG9nICJhenVyZS1hZ2VudCAkQUdFTlRfVkVSU0lPTiBpcyBvbGRlciB0aGFuIHJlcXVpcmVkICRBR0VOVF9NSU5JTVVNIjsgZXhpdCAxOwp9CiMgRG8gbm90IHN0b3AvcmVzdGFydCB0aGUgZXh0ZW5zaW9uJ3MgcGFyZW50IGFnZW50IHdoaWxlIHByb3Zpc2lvbmluZyBpcyBydW5uaW5nLgojIERpc2FibGUgcmVwcm92aXNpb25pbmcgYW5kIHNjcmF0Y2gtZGlzayBjaGFuZ2VzIG9uIHN1YnNlcXVlbnQgT1BOc2Vuc2UgYm9vdHMuClsgLWYgL3Vzci9sb2NhbC9ldGMvd2FhZ2VudC5jb25mIF0gfHwgY3AgL3Vzci9sb2NhbC9ldGMvd2FhZ2VudC5jb25mLnNhbXBsZSAvdXNyL2xvY2FsL2V0Yy93YWFnZW50LmNvbmYKZm9yIHNldHRpbmcgaW4gJ1Jlc291cmNlRGlzay5FbmFibGVTd2FwPW4nICdSZXNvdXJjZURpc2suRm9ybWF0PW4nICdQcm92aXNpb25pbmcuQWdlbnQ9ZGlzYWJsZWQnICdQcm92aXNpb25pbmcuRGVsZXRlUm9vdFBhc3N3b3JkPW4nICdQcm92aXNpb25pbmcuTW9uaXRvckhvc3ROYW1lPW4nOyBkbwogICAga2V5PSR7c2V0dGluZyUlPSp9CiAgICBzZWQgLWkgJycgIi9eJHtrZXl9PS9kIiAvdXNyL2xvY2FsL2V0Yy93YWFnZW50LmNvbmYKICAgIHByaW50ZiAnJXNcbicgIiRzZXR0aW5nIiA+PiAvdXNyL2xvY2FsL2V0Yy93YWFnZW50LmNvbmYKZG9uZQpzeXNyYyB3YWFnZW50X2VuYWJsZT1ZRVMKIyBBIHNlcGFyYXRlIGxhdGUgaG9vayBzdGFydHMgd2FhZ2VudCBhZnRlciB0aGUgQXp1cmUgcGxhdGZvcm0gcm91dGUgaXMgcmVzdG9yZWQuCnN5c3JjIHdhYWdlbnRfc2tpcD1ZRVMKaW5zdGFsbCAtbSA2NDQgIiRXT1JLL2FjdGlvbnNfd2FhZ2VudC5jb25mIiAvdXNyL2xvY2FsL29wbnNlbnNlL3NlcnZpY2UvY29uZi9hY3Rpb25zLmQvYWN0aW9uc193YWFnZW50LmNvbmYKaW5zdGFsbCAtbSA3NTUgIiRXT1JLL3ZlcmlmeV9vcG5zZW5zZS5zaCIgL3Vzci9sb2NhbC9zYmluL29wbmF6dXJlLXZlcmlmeQoKIyBQcmVzZXJ2ZSB0aGUgdXBzdHJlYW0gcGxhdGZvcm0tSVAgd29ya2Fyb3VuZCwgd2l0aG91dCBtb2RpZnlpbmcgdmVuZG9yIGhvb2tzLgojIDE2OC42My4xMjkuMTYgaXMgQXp1cmUncyB3aXJlIHNlcnZlci9wcm9iZSBJUDsgSU1EUyBpcyAxNjkuMjU0LjE2OS4yNTQuCmNhdCA+IC91c3IvbG9jYWwvZXRjL3JjLnN5c2hvb2suZC9zdGFydC8yMS1vcG5henVyZS1wbGF0Zm9ybSA8PCdIT09LJwojIS9iaW4vc2gKc2V0IC1ldQojIEEgbWlzc2luZyBob3N0IHJvdXRlIGlzIG5vcm1hbCBvbiBzb21lIGltYWdlL2xlYXNlIGNvbWJpbmF0aW9ucy4Kcm91dGUgZGVsZXRlIC1ob3N0IDE2OC42My4xMjkuMTYgPi9kZXYvbnVsbCAyPiYxIHx8IDoKYXJwIC1zIDE2OC42My4xMjkuMTYgMTI6MzQ6NTY6Nzg6OWE6YmMKc2VydmljZSB3YWFnZW50IG9uZXN0YXR1cyA+L2Rldi9udWxsIDI+JjEgfHwgc2VydmljZSB3YWFnZW50IHN0YXJ0CkhPT0sKY2htb2QgNzU1IC91c3IvbG9jYWwvZXRjL3JjLnN5c2hvb2suZC9zdGFydC8yMS1vcG5henVyZS1wbGF0Zm9ybQoKY2F0ID4gL3Vzci9sb2NhbC9ldGMvcmMuc3lzaG9vay5kL3N0YXJ0Lzk1LW9wbmF6dXJlLXZlcmlmeSA8PCdIT09LJwojIS9iaW4vc2gKc2V0IC1ldQpleGVjID4+IC92YXIvbG9nL29wbmF6dXJlLWZpcnN0Ym9vdC5sb2cgMj4mMQpXT1JLPS92YXIvZGIvb3BuYXp1cmUKcHJpbnRmICd2ZXJpZnlpbmctZmlyc3QtYm9vdFxuJyA+ICIkV09SSy9zdGF0dXMiCnRyYXAgJ3ByaW50ZiAiZmlyc3QtYm9vdC1mYWlsZWRcbiIgPiAvdmFyL2RiL29wbmF6dXJlL3N0YXR1cycgRVhJVAojIFJldHJ5IG9uIGEgbGF0ZXIgYm9vdCBpZiByZW5ld2FsIGZhaWxzOyBkbyBub3QgcmVtb3ZlIHRoZSBtYXJrZXIgcHJlbWF0dXJlbHkuCmlmIFsgISAtZiAiJFdPUksvY2VydGlmaWNhdGUtcmVuZXdlZCIgXTsgdGhlbgogICAgY29uZmlnY3RsIHdlYmd1aSByZXN0YXJ0IHJlbmV3CiAgICB0b3VjaCAiJFdPUksvY2VydGlmaWNhdGUtcmVuZXdlZCIKZmkKL3Vzci9sb2NhbC9zYmluL29wbmF6dXJlLXZlcmlmeQpwcmludGYgJ3JlYWR5XG4nID4gIiRXT1JLL3N0YXR1cyIKZGF0ZSAtdSA+ICIkV09SSy9maXJzdC1ib290LWNvbXBsZXRlIgp0cmFwIC0gRVhJVApIT09LCmNobW9kIDc1NSAvdXNyL2xvY2FsL2V0Yy9yYy5zeXNob29rLmQvc3RhcnQvOTUtb3BuYXp1cmUtdmVyaWZ5CgojIEhBIGlzIG9wdGlvbmFsOyBleGlzdGluZyBzY2VuYXJpb3MgcmV0YWluIHRoZWlyIG9yaWdpbmFsIGJvb3RzdHJhcC4KSEFfRU5BQkxFRD0kKCIkUFlUSE9OIiAtYyAnaW1wb3J0IGpzb24sc3lzOyBwcmludCgieWVzIiBpZiBqc29uLmxvYWQob3BlbihzeXMuYXJndlsxXSkpLmdldCgiaGEiKSBlbHNlICJubyIpJyAiJFdPUksvc2V0dGluZ3MuanNvbiIpCmlmIFsgIiRIQV9FTkFCTEVEIiA9IHllcyBdOyB0aGVuCiAgICBzdGFnZSBpbnN0YWxsaW5nLWFjdGl2ZS1iYWNrdXAKICAgIG1rZGlyIC1wICIkV09SSy9oYSIKICAgIGZvciBmaWxlIGluIGFnZW50LnB5IGluc3RhbGwucHk7IGRvCiAgICAgICAgZmV0Y2hfZmlsZSAiJHtTQ1JJUFRfVVJJfWhhLyRmaWxlIiAiJFdPUksvaGEvJGZpbGUiCiAgICBkb25lCiAgICAvdXNyL2xvY2FsL2Jpbi9weXRob24zICIkV09SSy9oYS9pbnN0YWxsLnB5IiAiJFdPUksvc2V0dGluZ3MuanNvbiIgIiRXT1JLL2hhL2FnZW50LnB5IgpmaQoKc3RhZ2UgY2hlY2tpbmctaW5zdGFsbGVkLXBhY2thZ2VzCk9QTl9WRVJTSU9OPSQocGtnIHF1ZXJ5ICcldicgb3Buc2Vuc2UpCmNhc2UgIiRPUE5fVkVSU0lPTiIgaW4gMjYuNyopIDs7ICopIGxvZyAiVW5leHBlY3RlZCBPUE5zZW5zZSB2ZXJzaW9uOiAkT1BOX1ZFUlNJT04iOyBleGl0IDEgOzsgZXNhYwpbICIkKHBrZyB2ZXJzaW9uIC10ICIkT1BOX1ZFUlNJT04iICcyNi43LjRfMScpIiAhPSAnPCcgXSB8fCB7CiAgICBsb2cgIk9QTnNlbnNlICRPUE5fVkVSU0lPTiBpcyBvbGRlciB0aGFuIHRoZSBtaW5pbXVtIDI2LjcuNF8xOyBjaGVjayB0aGUgbWlycm9yIjsgZXhpdCAxOwp9CnBrZyBjaGVjayAtZCAtYQovdXNyL2xvY2FsL3NiaW4vd2FhZ2VudCAtdmVyc2lvbgp7CiAgICBwcmludGYgJ09QTnNlbnNlPSVzXG5BenVyZUFnZW50PSVzXG5Cb290c3RyYXBDb21taXQ9JXNcbicgIiRPUE5fVkVSU0lPTiIgIiRBR0VOVF9WRVJTSU9OIiAiJEJPT1RTVFJBUF9DT01NSVQiCiAgICBmcmVlYnNkLXZlcnNpb24gLXUKICAgIHBrZyBxdWVyeSAnJW4gJXYnCn0gPiAiJFdPUksvaW5zdGFsbGVkLXZlcnNpb25zLnR4dCIKIyBMZWF2ZSB0aW1lIGZvciB0aGUgZXh0ZW5zaW9uIHRvIHJlcG9ydCBpdHMgZXhpdCBzdGF0dXMsIEFGVEVSIGV2ZXJ5IGluc3RhbGwvY2hlY2suCnN0YWdlIGF3YWl0aW5nLXJlYm9vdAp0b3VjaCAiJFdPUksvYm9vdHN0cmFwLWNvbXBsZXRlIgppZiAhIHNodXRkb3duIC1yICsxICdPUE5zZW5zZSBib290c3RyYXAgY29tcGxldGVkOyByZWJvb3RpbmcgaW50byBPUE5zZW5zZSc7IHRoZW4KICAgIHJtIC1mICIkV09SSy9ib290c3RyYXAtY29tcGxldGUiCiAgICBleGl0IDEKZmkKbG9nICdCb290c3RyYXAgY29tcGxldGVkLiBGaXJzdC1ib290IGNoZWNrcyBhcmUgc3RpbGwgcGVuZGluZzsgc2VlIC92YXIvZGIvb3BuYXp1cmUvc3RhdHVzIGFmdGVyIHJlYm9vdC4nCg==",
+                    "$fxv#1": "PD94bWwgdmVyc2lvbj0iMS4wIj8+CjxvcG5zZW5zZT4KICA8dmVyc2lvbj4xMS4yPC92ZXJzaW9uPgogIDx0aGVtZT5vcG5zZW5zZTwvdGhlbWU+CiAgPHN5c2N0bD4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+RGlzYWJsZSB0aGUgcGYgZnRwIHByb3h5IGhhbmRsZXIuPC9kZXNjcj4KICAgICAgPHR1bmFibGU+ZGVidWcucGZmdHBwcm94eTwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5JbmNyZWFzZSBVRlMgcmVhZC1haGVhZCBzcGVlZHMgdG8gbWF0Y2ggY3VycmVudCBzdGF0ZSBvZiBoYXJkIGRyaXZlcyBhbmQgTkNRLiBNb3JlIGluZm9ybWF0aW9uIGhlcmU6IGh0dHA6Ly9pdm9yYXMuc2hhcmFuZXQub3JnL2Jsb2cvdHJlZS8yMDEwLTExLTE5LnVmcy1yZWFkLWFoZWFkLmh0bWw8L2Rlc2NyPgogICAgICA8dHVuYWJsZT52ZnMucmVhZF9tYXg8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+U2V0IHRoZSBlcGhlbWVyYWwgcG9ydCByYW5nZSB0byBiZSBsb3dlci48L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldC5pcC5wb3J0cmFuZ2UuZmlyc3Q8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+RHJvcCBwYWNrZXRzIHRvIGNsb3NlZCBUQ1AgcG9ydHMgd2l0aG91dCByZXR1cm5pbmcgYSBSU1Q8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldC50Y3AuYmxhY2tob2xlPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPkRvIG5vdCBzZW5kIElDTVAgcG9ydCB1bnJlYWNoYWJsZSBtZXNzYWdlcyBmb3IgY2xvc2VkIFVEUCBwb3J0czwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5pbmV0LnVkcC5ibGFja2hvbGU8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+UmFuZG9taXplIHRoZSBJRCBmaWVsZCBpbiBJUCBwYWNrZXRzIChkZWZhdWx0IGlzIDA6IHNlcXVlbnRpYWwgSVAgSURzKTwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5pbmV0LmlwLnJhbmRvbV9pZDwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj4KICAgICAgICBTb3VyY2Ugcm91dGluZyBpcyBhbm90aGVyIHdheSBmb3IgYW4gYXR0YWNrZXIgdG8gdHJ5IHRvIHJlYWNoIG5vbi1yb3V0YWJsZSBhZGRyZXNzZXMgYmVoaW5kIHlvdXIgYm94LgogICAgICAgIEl0IGNhbiBhbHNvIGJlIHVzZWQgdG8gcHJvYmUgZm9yIGluZm9ybWF0aW9uIGFib3V0IHlvdXIgaW50ZXJuYWwgbmV0d29ya3MuIFRoZXNlIGZ1bmN0aW9ucyBjb21lIGVuYWJsZWQKICAgICAgICBhcyBwYXJ0IG9mIHRoZSBzdGFuZGFyZCBGcmVlQlNEIGNvcmUgc3lzdGVtLgogICAgICA8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldC5pcC5zb3VyY2Vyb3V0ZTwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj4KICAgICAgICBTb3VyY2Ugcm91dGluZyBpcyBhbm90aGVyIHdheSBmb3IgYW4gYXR0YWNrZXIgdG8gdHJ5IHRvIHJlYWNoIG5vbi1yb3V0YWJsZSBhZGRyZXNzZXMgYmVoaW5kIHlvdXIgYm94LgogICAgICAgIEl0IGNhbiBhbHNvIGJlIHVzZWQgdG8gcHJvYmUgZm9yIGluZm9ybWF0aW9uIGFib3V0IHlvdXIgaW50ZXJuYWwgbmV0d29ya3MuIFRoZXNlIGZ1bmN0aW9ucyBjb21lIGVuYWJsZWQKICAgICAgICBhcyBwYXJ0IG9mIHRoZSBzdGFuZGFyZCBGcmVlQlNEIGNvcmUgc3lzdGVtLgogICAgICA8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldC5pcC5hY2NlcHRfc291cmNlcm91dGU8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+CiAgICAgICAgUmVkaXJlY3QgYXR0YWNrcyBhcmUgdGhlIHB1cnBvc2VmdWwgbWFzcy1pc3N1aW5nIG9mIElDTVAgdHlwZSA1IHBhY2tldHMuIEluIGEgbm9ybWFsIG5ldHdvcmssIHJlZGlyZWN0cwogICAgICAgIHRvIHRoZSBlbmQgc3RhdGlvbnMgc2hvdWxkIG5vdCBiZSByZXF1aXJlZC4gVGhpcyBvcHRpb24gZW5hYmxlcyB0aGUgTklDIHRvIGRyb3AgYWxsIGluYm91bmQgSUNNUCByZWRpcmVjdAogICAgICAgIHBhY2tldHMgd2l0aG91dCByZXR1cm5pbmcgYSByZXNwb25zZS4KICAgICAgPC9kZXNjcj4KICAgICAgPHR1bmFibGU+bmV0LmluZXQuaWNtcC5kcm9wX3JlZGlyZWN0PC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPgogICAgICAgIFRoaXMgb3B0aW9uIHR1cm5zIG9mZiB0aGUgbG9nZ2luZyBvZiByZWRpcmVjdCBwYWNrZXRzIGJlY2F1c2UgdGhlcmUgaXMgbm8gbGltaXQgYW5kIHRoaXMgY291bGQgZmlsbAogICAgICAgIHVwIHlvdXIgbG9ncyBjb25zdW1pbmcgeW91ciB3aG9sZSBoYXJkIGRyaXZlLgogICAgICA8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldC5pY21wLmxvZ19yZWRpcmVjdDwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5Ecm9wIFNZTi1GSU4gcGFja2V0cyAoYnJlYWtzIFJGQzEzNzksIGJ1dCBub2JvZHkgdXNlcyBpdCBhbnl3YXkpPC9kZXNjcj4KICAgICAgPHR1bmFibGU+bmV0LmluZXQudGNwLmRyb3Bfc3luZmluPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPkVuYWJsZSBzZW5kaW5nIElQdjQgcmVkaXJlY3RzPC9kZXNjcj4KICAgICAgPHR1bmFibGU+bmV0LmluZXQuaXAucmVkaXJlY3Q8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+RW5hYmxlIHNlbmRpbmcgSVB2NiByZWRpcmVjdHM8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldDYuaXA2LnJlZGlyZWN0PC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPkVuYWJsZSBwcml2YWN5IHNldHRpbmdzIGZvciBJUHY2IChSRkMgNDk0MSk8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldDYuaXA2LnVzZV90ZW1wYWRkcjwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5QcmVmZXIgcHJpdmFjeSBhZGRyZXNzZXMgYW5kIHVzZSB0aGVtIG92ZXIgdGhlIG5vcm1hbCBhZGRyZXNzZXM8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldDYuaXA2LnByZWZlcl90ZW1wYWRkcjwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5HZW5lcmF0ZSBTWU4gY29va2llcyBmb3Igb3V0Ym91bmQgU1lOLUFDSyBwYWNrZXRzPC9kZXNjcj4KICAgICAgPHR1bmFibGU+bmV0LmluZXQudGNwLnN5bmNvb2tpZXM8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+TWF4aW11bSBpbmNvbWluZy9vdXRnb2luZyBUQ1AgZGF0YWdyYW0gc2l6ZSAocmVjZWl2ZSk8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldC50Y3AucmVjdnNwYWNlPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPk1heGltdW0gaW5jb21pbmcvb3V0Z29pbmcgVENQIGRhdGFncmFtIHNpemUgKHNlbmQpPC9kZXNjcj4KICAgICAgPHR1bmFibGU+bmV0LmluZXQudGNwLnNlbmRzcGFjZTwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5JUCBGYXN0Zm9yd2FyZGluZzwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5pbmV0LmlwLmZhc3Rmb3J3YXJkaW5nPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPkRvIG5vdCBkZWxheSBBQ0sgdG8gdHJ5IGFuZCBwaWdneWJhY2sgaXQgb250byBhIGRhdGEgcGFja2V0PC9kZXNjcj4KICAgICAgPHR1bmFibGU+bmV0LmluZXQudGNwLmRlbGF5ZWRfYWNrPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPk1heGltdW0gb3V0Z29pbmcgVURQIGRhdGFncmFtIHNpemU8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQuaW5ldC51ZHAubWF4ZGdyYW08L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+SGFuZGxpbmcgb2Ygbm9uLUlQIHBhY2tldHMgd2hpY2ggYXJlIG5vdCBwYXNzZWQgdG8gcGZpbCAoc2VlIGlmX2JyaWRnZSg0KSk8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQubGluay5icmlkZ2UucGZpbF9vbmx5aXA8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+U2V0IHRvIDAgdG8gZGlzYWJsZSBmaWx0ZXJpbmcgb24gdGhlIGluY29taW5nIGFuZCBvdXRnb2luZyBtZW1iZXIgaW50ZXJmYWNlcy48L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQubGluay5icmlkZ2UucGZpbF9tZW1iZXI8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+U2V0IHRvIDEgdG8gZW5hYmxlIGZpbHRlcmluZyBvbiB0aGUgYnJpZGdlIGludGVyZmFjZTwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5saW5rLmJyaWRnZS5wZmlsX2JyaWRnZTwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5BbGxvdyB1bnByaXZpbGVnZWQgYWNjZXNzIHRvIHRhcCg0KSBkZXZpY2Ugbm9kZXM8L2Rlc2NyPgogICAgICA8dHVuYWJsZT5uZXQubGluay50YXAudXNlcl9vcGVuPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPlJhbmRvbWl6ZSBQSUQncyAoc2VlIHNyYy9zeXMva2Vybi9rZXJuX2ZvcmsuYzogc3lzY3RsX2tlcm5fcmFuZG9tcGlkKCkpPC9kZXNjcj4KICAgICAgPHR1bmFibGU+a2Vybi5yYW5kb21waWQ8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+TWF4aW11bSBzaXplIG9mIHRoZSBJUCBpbnB1dCBxdWV1ZTwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5pbmV0LmlwLmludHJfcXVldWVfbWF4bGVuPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPkRpc2FibGUgQ1RSTCtBTFQrRGVsZXRlIHJlYm9vdCBmcm9tIGtleWJvYXJkLjwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPmh3LnN5c2NvbnMua2JkX3JlYm9vdDwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5FbmFibGUgVENQIGV4dGVuZGVkIGRlYnVnZ2luZzwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5pbmV0LnRjcC5sb2dfZGVidWc8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+U2V0IElDTVAgTGltaXRzPC9kZXNjcj4KICAgICAgPHR1bmFibGU+bmV0LmluZXQuaWNtcC5pY21wbGltPC90dW5hYmxlPgogICAgICA8dmFsdWU+ZGVmYXVsdDwvdmFsdWU+CiAgICA8L2l0ZW0+CiAgICA8aXRlbT4KICAgICAgPGRlc2NyPlRDUCBPZmZsb2FkIEVuZ2luZTwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5pbmV0LnRjcC50c288L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICAgIDxpdGVtPgogICAgICA8ZGVzY3I+VURQIENoZWNrc3VtczwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPm5ldC5pbmV0LnVkcC5jaGVja3N1bTwvdHVuYWJsZT4KICAgICAgPHZhbHVlPmRlZmF1bHQ8L3ZhbHVlPgogICAgPC9pdGVtPgogICAgPGl0ZW0+CiAgICAgIDxkZXNjcj5NYXhpbXVtIHNvY2tldCBidWZmZXIgc2l6ZTwvZGVzY3I+CiAgICAgIDx0dW5hYmxlPmtlcm4uaXBjLm1heHNvY2tidWY8L3R1bmFibGU+CiAgICAgIDx2YWx1ZT5kZWZhdWx0PC92YWx1ZT4KICAgIDwvaXRlbT4KICA8L3N5c2N0bD4KICA8c3lzdGVtPgogICAgPG9wdGltaXphdGlvbj5ub3JtYWw8L29wdGltaXphdGlvbj4KICAgIDxob3N0bmFtZT5PUE5zZW5zZTwvaG9zdG5hbWU+CiAgICA8ZG9tYWluPmxvY2FsaG9zdDwvZG9tYWluPgogICAgPGRuc2FsbG93b3ZlcnJpZGU+MTwvZG5zYWxsb3dvdmVycmlkZT4KICAgIDxncm91cD4KICAgICAgPG5hbWU+YWRtaW5zPC9uYW1lPgogICAgICA8ZGVzY3JpcHRpb24+U3lzdGVtIEFkbWluaXN0cmF0b3JzPC9kZXNjcmlwdGlvbj4KICAgICAgPHNjb3BlPnN5c3RlbTwvc2NvcGU+CiAgICAgIDxnaWQ+MTk5OTwvZ2lkPgogICAgICA8bWVtYmVyPjA8L21lbWJlcj4KICAgICAgPHByaXY+dXNlci1zaGVsbC1hY2Nlc3M8L3ByaXY+CiAgICAgIDxwcml2PnBhZ2UtYWxsPC9wcml2PgogICAgPC9ncm91cD4KICAgIDx1c2VyPgogICAgICA8bmFtZT5yb290PC9uYW1lPgogICAgICA8ZGVzY3I+U3lzdGVtIEFkbWluaXN0cmF0b3I8L2Rlc2NyPgogICAgICA8c2NvcGU+c3lzdGVtPC9zY29wZT4KICAgICAgPGdyb3VwbmFtZT5hZG1pbnM8L2dyb3VwbmFtZT4KICAgICAgPHBhc3N3b3JkPiQyYiQxMCRZUlZvRjRTZ3NrSXNyWE92T1FqR2llQjlYcUhQUnJhOVI3ZDgwQjNCWmRiWS9qMjFUd0JmUzwvcGFzc3dvcmQ+CiAgICAgIDxkYXNoYm9hcmQ+ZXlKdmNIUnBiMjV6SWpwYlhTd2lkMmxrWjJWMGN5STZXM3NpYVdRaU9pSnplWE4wWlcxcGJtWnZjbTFoZEdsdmJpSXNJbTFwYmxjaU9qSXNJbmdpT2pBc0lua2lPakFzSW1naU9qVXdPU3dpZDJsa1oyVjBJanBiWFgwc2V5SnBaQ0k2SW0xbGJXOXllU0lzSW0xcGJsY2lPakVzSW5naU9qSXNJbmtpT2pBc0ltZ2lPakV5TXl3aWQybGtaMlYwSWpwYlhYMHNleUpwWkNJNkltUnBjMnNpTENKdGFXNVhJam94TENKNElqb3pMQ0o1SWpvd0xDSm9Jam94TWpNc0luZHBaR2RsZENJNlcxMTlMSHNpYVdRaU9pSnBiblJsY21aaFkyVnpkR0YwYVhOMGFXTnpJaXdpYldsdVZ5STZNaXdpZUNJNk5Dd2llU0k2TUN3aWR5STZOQ3dpYUNJNk16STJMQ0ozYVdSblpYUWlPbHRkZlN4N0ltbGtJam9pWm1seVpYZGhiR3dpTENKdGFXNVhJam95TENKNElqbzRMQ0o1SWpvd0xDSjNJam8wTENKb0lqb3pNallzSW5kcFpHZGxkQ0k2VzExOUxIc2lhV1FpT2lKcGJuUmxjbVpoWTJWeklpd2liV2x1VnlJNk1pd2ljMmw2WlZSdlEyOXVkR1Z1ZENJNk5qVXdMQ0o0SWpveUxDSjVJam94TWpNc0ltZ2lPakl4TXl3aWQybGtaMlYwSWpwYlhYMHNleUpwWkNJNkluTmxjblpwWTJWeklpd2liV2x1VnlJNk1pd2llQ0k2TkN3aWVTSTZNekkyTENKM0lqbzBMQ0p6YVhwbFZHOURiMjUwWlc1MElqbzJOVEFzSW1naU9qVXpNQ3dpZDJsa1oyVjBJanBiWFgwc2V5SnBaQ0k2SW5SeVlXWm1hV01pTENKdGFXNVhJam95TENKNElqbzRMQ0o1SWpvek1qWXNJbmNpT2pRc0ltZ2lPalEwTlN3aWQybGtaMlYwSWpwN0ltbHVkR1Z5Wm1GalpYTWlPbHNpYkdGdUlpd2lkMkZ1SWwxOWZTeDdJbWxrSWpvaVoyRjBaWGRoZVhNaUxDSnRhVzVYSWpveUxDSjRJam95TENKNUlqb3pNellzSW5OcGVtVlViME52Ym5SbGJuUWlPalkxTUN3aWFDSTZNak16TENKM2FXUm5aWFFpT25zaVoyRjBaWGRoZVhNaU9sc2lWMEZPWDBSSVExQWlMQ0kxWWpFME1tRmxNUzA1WW1Fd0xUUmlabUl0T1RZMVlpMHlPVGM0TlRBM05UVm1ZVEFpWFgxOUxIc2lhV1FpT2lKamNIVWlMQ0p0YVc1WElqb3lMQ0o0SWpvd0xDSjVJam8xTURrc0ltZ2lPakUzTnl3aWQybGtaMlYwSWpwN0ltZHlZWEJvY3lJNld5SjBiM1JoYkNKZGZYMHNleUpwWkNJNkltRnVibTkxYm1ObGJXVnVkSE1pTENKdGFXNVhJam95TENKNElqb3lMQ0o1SWpvMU5qa3NJbk5wZW1WVWIwTnZiblJsYm5RaU9qTTFNQ3dpYUNJNk16VXdMQ0ozYVdSblpYUWlPbHRkZlYwc0lteGhlVzkxZEhNaU9uc2lNVElpT25zaWMzbHpkR1Z0YVc1bWIzSnRZWFJwYjI0aU9uc2lhV1FpT2lKemVYTjBaVzFwYm1admNtMWhkR2x2YmlJc0luZ2lPakFzSW5raU9qQXNJbmNpT2pJc0ltZ2lPalV3T1gwc0ltMWxiVzl5ZVNJNmV5SnBaQ0k2SW0xbGJXOXllU0lzSW5naU9qSXNJbmtpT2pBc0luY2lPbTUxYkd3c0ltZ2lPakV5TTMwc0ltUnBjMnNpT25zaWFXUWlPaUprYVhOcklpd2llQ0k2TXl3aWVTSTZNQ3dpZHlJNmJuVnNiQ3dpYUNJNk1USXpmU3dpYVc1MFpYSm1ZV05sYzNSaGRHbHpkR2xqY3lJNmV5SnBaQ0k2SW1sdWRHVnlabUZqWlhOMFlYUnBjM1JwWTNNaUxDSjRJam8wTENKNUlqb3dMQ0ozSWpvMExDSm9Jam96TWpaOUxDSm1hWEpsZDJGc2JDSTZleUpwWkNJNkltWnBjbVYzWVd4c0lpd2llQ0k2T0N3aWVTSTZNQ3dpZHlJNk5Dd2lhQ0k2TXpJMmZTd2lhVzUwWlhKbVlXTmxjeUk2ZXlKcFpDSTZJbWx1ZEdWeVptRmpaWE1pTENKNElqb3lMQ0o1SWpveE1qTXNJbmNpT2pJc0ltZ2lPakl4TTMwc0luTmxjblpwWTJWeklqcDdJbWxrSWpvaWMyVnlkbWxqWlhNaUxDSjRJam8wTENKNUlqb3pNallzSW5jaU9qUXNJbWdpT2pVek1IMHNJbWRoZEdWM1lYbHpJanA3SW1sa0lqb2laMkYwWlhkaGVYTWlMQ0o0SWpveUxDSjVJam96TXpZc0luY2lPaklzSW1naU9qSXpNMzBzSW1Od2RTSTZleUpwWkNJNkltTndkU0lzSW5naU9qQXNJbmtpT2pVd09Td2lkeUk2TWl3aWFDSTZNVGMzZlN3aVlXNXViM1Z1WTJWdFpXNTBjeUk2ZXlKcFpDSTZJbUZ1Ym05MWJtTmxiV1Z1ZEhNaUxDSjRJam95TENKNUlqbzFOamtzSW5jaU9qSXNJbWdpT2pNMU1IMHNJblJ5WVdabWFXTWlPbnNpYVdRaU9pSjBjbUZtWm1saklpd2llQ0k2T0N3aWVTSTZNekkyTENKM0lqbzBMQ0pvSWpvME5EVjlmWDE5PC9kYXNoYm9hcmQ+CiAgICAgIDx1aWQ+MDwvdWlkPgogICAgPC91c2VyPgogICAgPG5leHR1aWQ+MjAwMDwvbmV4dHVpZD4KICAgIDxuZXh0Z2lkPjIwMDA8L25leHRnaWQ+CiAgICA8dGltZXpvbmU+QW1lcmljYS9NZXhpY29fQ2l0eTwvdGltZXpvbmU+CiAgICA8dGltZS11cGRhdGUtaW50ZXJ2YWw+MzAwPC90aW1lLXVwZGF0ZS1pbnRlcnZhbD4KICAgIDx0aW1lc2VydmVycz4wLm5sLnBvb2wubnRwLm9yZzwvdGltZXNlcnZlcnM+CiAgICA8d2ViZ3VpPgogICAgICA8cHJvdG9jb2w+aHR0cHM8L3Byb3RvY29sPgogICAgICA8c3NsLWNlcnRyZWY+NTk4MTAyNTAwZjM1NTwvc3NsLWNlcnRyZWY+CiAgICAgIDxwb3J0Lz4KICAgICAgPHNzbC1jaXBoZXJzLz4KICAgICAgPGNvbXByZXNzaW9uLz4KICAgICAgPG5vaHR0cHJlZmVyZXJjaGVjaz4xPC9ub2h0dHByZWZlcmVyY2hlY2s+CiAgICAgIDxub2FudGlsb2Nrb3V0PjE8L25vYW50aWxvY2tvdXQ+CiAgICA8L3dlYmd1aT4KICAgIDxkaXNhYmxlbmF0cmVmbGVjdGlvbj55ZXM8L2Rpc2FibGVuYXRyZWZsZWN0aW9uPgogICAgPHVzZXZpcnR1YWx0ZXJtaW5hbD4xPC91c2V2aXJ0dWFsdGVybWluYWw+CiAgICA8ZGlzYWJsZWNvbnNvbGVtZW51PjE8L2Rpc2FibGVjb25zb2xlbWVudT4KICAgIDxkaXNhYmxlY2hlY2tzdW1vZmZsb2FkaW5nPjE8L2Rpc2FibGVjaGVja3N1bW9mZmxvYWRpbmc+CiAgICA8ZGlzYWJsZXNlZ21lbnRhdGlvbm9mZmxvYWRpbmc+MTwvZGlzYWJsZXNlZ21lbnRhdGlvbm9mZmxvYWRpbmc+CiAgICA8ZGlzYWJsZWxhcmdlcmVjZWl2ZW9mZmxvYWRpbmc+MTwvZGlzYWJsZWxhcmdlcmVjZWl2ZW9mZmxvYWRpbmc+CiAgICA8aXB2NmFsbG93Lz4KICAgIDxwb3dlcmRfYWNfbW9kZT5oYWRwPC9wb3dlcmRfYWNfbW9kZT4KICAgIDxwb3dlcmRfYmF0dGVyeV9tb2RlPmhhZHA8L3Bvd2VyZF9iYXR0ZXJ5X21vZGU+CiAgICA8cG93ZXJkX25vcm1hbF9tb2RlPmhhZHA8L3Bvd2VyZF9ub3JtYWxfbW9kZT4KICAgIDxib2dvbnM+CiAgICAgIDxpbnRlcnZhbD5tb250aGx5PC9pbnRlcnZhbD4KICAgIDwvYm9nb25zPgogICAgPGtpbGxfc3RhdGVzLz4KICAgIDxiYWNrdXBjb3VudD42MDwvYmFja3VwY291bnQ+CiAgICA8Y3J5cHRvX2hhcmR3YXJlPmFlc25pPC9jcnlwdG9faGFyZHdhcmU+CiAgICA8bGFuZ3VhZ2U+ZW5fVVM8L2xhbmd1YWdlPgogICAgPGRuc3NlcnZlcj44LjguOC44PC9kbnNzZXJ2ZXI+CiAgICA8ZG5zc2VydmVyPjguOC40LjQ8L2Ruc3NlcnZlcj4KICAgIDxzdWRvX2FsbG93X3doZWVsPjE8L3N1ZG9fYWxsb3dfd2hlZWw+CiAgICA8c2VyaWFsc3BlZWQ+MTE1MjAwPC9zZXJpYWxzcGVlZD4KICAgIDxwcmltYXJ5Y29uc29sZT52aWRlbzwvcHJpbWFyeWNvbnNvbGU+CiAgICA8c2Vjb25kYXJ5Y29uc29sZT5zZXJpYWw8L3NlY29uZGFyeWNvbnNvbGU+CiAgICA8c3NoPgogICAgICA8ZW5hYmxlZD5lbmFibGVkPC9lbmFibGVkPgogICAgICA8cGFzc3dvcmRhdXRoPjE8L3Bhc3N3b3JkYXV0aD4KICAgICAgPHBlcm1pdHJvb3Rsb2dpbj4xPC9wZXJtaXRyb290bG9naW4+CiAgICA8L3NzaD4KICAgIDxkbnMxZ3c+bm9uZTwvZG5zMWd3PgogICAgPGRuczJndz5ub25lPC9kbnMyZ3c+CiAgICA8ZG5zM2d3Pm5vbmU8L2RuczNndz4KICAgIDxkbnM0Z3c+bm9uZTwvZG5zNGd3PgogICAgPGRuczVndz5ub25lPC9kbnM1Z3c+CiAgICA8ZG5zNmd3Pm5vbmU8L2RuczZndz4KICAgIDxkbnM3Z3c+bm9uZTwvZG5zN2d3PgogICAgPGRuczhndz5ub25lPC9kbnM4Z3c+CiAgPC9zeXN0ZW0+CiAgPGludGVyZmFjZXM+CiAgICA8d2FuPgogICAgICA8aWY+aG4wPC9pZj4KICAgICAgPGRlc2NyLz4KICAgICAgPGVuYWJsZT4xPC9lbmFibGU+CiAgICAgIDxzcG9vZm1hYy8+CiAgICAgIDxibG9ja2JvZ29ucz4xPC9ibG9ja2JvZ29ucz4KICAgICAgPGlwYWRkcj5kaGNwPC9pcGFkZHI+CiAgICAgIDxkaGNwaG9zdG5hbWUvPgogICAgICA8YWxpYXMtYWRkcmVzcy8+CiAgICAgIDxhbGlhcy1zdWJuZXQ+MzI8L2FsaWFzLXN1Ym5ldD4KICAgICAgPGRoY3ByZWplY3Rmcm9tLz4KICAgICAgPGFkdl9kaGNwX3B0X3RpbWVvdXQvPgogICAgICA8YWR2X2RoY3BfcHRfcmV0cnkvPgogICAgICA8YWR2X2RoY3BfcHRfc2VsZWN0X3RpbWVvdXQvPgogICAgICA8YWR2X2RoY3BfcHRfcmVib290Lz4KICAgICAgPGFkdl9kaGNwX3B0X2JhY2tvZmZfY3V0b2ZmLz4KICAgICAgPGFkdl9kaGNwX3B0X2luaXRpYWxfaW50ZXJ2YWwvPgogICAgICA8YWR2X2RoY3BfcHRfdmFsdWVzPlNhdmVkQ2ZnPC9hZHZfZGhjcF9wdF92YWx1ZXM+CiAgICAgIDxhZHZfZGhjcF9zZW5kX29wdGlvbnMvPgogICAgICA8YWR2X2RoY3BfcmVxdWVzdF9vcHRpb25zLz4KICAgICAgPGFkdl9kaGNwX3JlcXVpcmVkX29wdGlvbnMvPgogICAgICA8YWR2X2RoY3Bfb3B0aW9uX21vZGlmaWVycy8+CiAgICAgIDxhZHZfZGhjcF9jb25maWdfYWR2YW5jZWQvPgogICAgICA8YWR2X2RoY3BfY29uZmlnX2ZpbGVfb3ZlcnJpZGUvPgogICAgICA8YWR2X2RoY3BfY29uZmlnX2ZpbGVfb3ZlcnJpZGVfcGF0aC8+CiAgICA8L3dhbj4KICAgIDxsYW4+CiAgICAgIDxpZj5objE8L2lmPgogICAgICA8ZGVzY3I+TEFOPC9kZXNjcj4KICAgICAgPGVuYWJsZT4xPC9lbmFibGU+CiAgICAgIDxzcG9vZm1hYy8+CiAgICAgIDxpcGFkZHI+ZGhjcDwvaXBhZGRyPgogICAgICA8ZGhjcGhvc3RuYW1lLz4KICAgICAgPGFsaWFzLWFkZHJlc3MvPgogICAgICA8YWxpYXMtc3VibmV0PjMyPC9hbGlhcy1zdWJuZXQ+CiAgICAgIDxkaGNwcmVqZWN0ZnJvbS8+CiAgICAgIDxhZHZfZGhjcF9wdF90aW1lb3V0Lz4KICAgICAgPGFkdl9kaGNwX3B0X3JldHJ5Lz4KICAgICAgPGFkdl9kaGNwX3B0X3NlbGVjdF90aW1lb3V0Lz4KICAgICAgPGFkdl9kaGNwX3B0X3JlYm9vdC8+CiAgICAgIDxhZHZfZGhjcF9wdF9iYWNrb2ZmX2N1dG9mZi8+CiAgICAgIDxhZHZfZGhjcF9wdF9pbml0aWFsX2ludGVydmFsLz4KICAgICAgPGFkdl9kaGNwX3B0X3ZhbHVlcz5TYXZlZENmZzwvYWR2X2RoY3BfcHRfdmFsdWVzPgogICAgICA8YWR2X2RoY3Bfc2VuZF9vcHRpb25zLz4KICAgICAgPGFkdl9kaGNwX3JlcXVlc3Rfb3B0aW9ucy8+CiAgICAgIDxhZHZfZGhjcF9yZXF1aXJlZF9vcHRpb25zLz4KICAgICAgPGFkdl9kaGNwX29wdGlvbl9tb2RpZmllcnMvPgogICAgICA8YWR2X2RoY3BfY29uZmlnX2FkdmFuY2VkLz4KICAgICAgPGFkdl9kaGNwX2NvbmZpZ19maWxlX292ZXJyaWRlLz4KICAgICAgPGFkdl9kaGNwX2NvbmZpZ19maWxlX292ZXJyaWRlX3BhdGgvPgogICAgPC9sYW4+CiAgPC9pbnRlcmZhY2VzPgogIDx1bmJvdW5kPgogICAgPGVuYWJsZT4xPC9lbmFibGU+CiAgICA8ZG5zc2VjPjE8L2Ruc3NlYz4KICAgIDxkbnNzZWNzdHJpcHBlZD4xPC9kbnNzZWNzdHJpcHBlZD4KICA8L3VuYm91bmQ+CiAgPHNubXBkPgogICAgPHN5c2xvY2F0aW9uLz4KICAgIDxzeXNjb250YWN0Lz4KICAgIDxyb2NvbW11bml0eT5wdWJsaWM8L3JvY29tbXVuaXR5PgogIDwvc25tcGQ+CiAgPHN5c2xvZz4KICAgIDxyZXZlcnNlLz4KICA8L3N5c2xvZz4KICA8ZmlsdGVyPgogICAgPHJ1bGU+CiAgICAgIDx0eXBlPnBhc3M8L3R5cGU+CiAgICAgIDxpbnRlcmZhY2U+d2FuPC9pbnRlcmZhY2U+CiAgICAgIDxpcHByb3RvY29sPmluZXQ8L2lwcHJvdG9jb2w+CiAgICAgIDxzdGF0ZXR5cGU+a2VlcCBzdGF0ZTwvc3RhdGV0eXBlPgogICAgICA8cHJvdG9jb2w+dGNwPC9wcm90b2NvbD4KICAgICAgPHNvdXJjZT4KICAgICAgICA8YW55PjE8L2FueT4KICAgICAgPC9zb3VyY2U+CiAgICAgIDxkZXN0aW5hdGlvbj4KICAgICAgICA8bmV0d29yaz53YW5pcDwvbmV0d29yaz4KICAgICAgICA8cG9ydD40NDM8L3BvcnQ+CiAgICAgIDwvZGVzdGluYXRpb24+CiAgICAgIDx1cGRhdGVkPgogICAgICAgIDx1c2VybmFtZT5yb290QDE4Ny4xNDMuMzcuNTE8L3VzZXJuYW1lPgogICAgICAgIDx0aW1lPjE1MDM3MDYyNTAuMjIyNjwvdGltZT4KICAgICAgICA8ZGVzY3JpcHRpb24+L2ZpcmV3YWxsX3J1bGVzX2VkaXQucGhwIG1hZGUgY2hhbmdlczwvZGVzY3JpcHRpb24+CiAgICAgIDwvdXBkYXRlZD4KICAgICAgPGNyZWF0ZWQ+CiAgICAgICAgPHVzZXJuYW1lPnJvb3RAMTg3LjE0My4zOS4yNTM8L3VzZXJuYW1lPgogICAgICAgIDx0aW1lPjE1MDIxNTAzMzQuMTI1NTwvdGltZT4KICAgICAgICA8ZGVzY3JpcHRpb24+L2ZpcmV3YWxsX3J1bGVzX2VkaXQucGhwIG1hZGUgY2hhbmdlczwvZGVzY3JpcHRpb24+CiAgICAgIDwvY3JlYXRlZD4KICAgIDwvcnVsZT4KICAgIDxydWxlPgogICAgICA8dHlwZT5wYXNzPC90eXBlPgogICAgICA8aW50ZXJmYWNlPmxhbjwvaW50ZXJmYWNlPgogICAgICA8aXBwcm90b2NvbD5pbmV0PC9pcHByb3RvY29sPgogICAgICA8c3RhdGV0eXBlPmtlZXAgc3RhdGU8L3N0YXRldHlwZT4KICAgICAgPGRlc2NyPkFsbG93IEF6dXJlIExvYWRiYWxhbmNlciBQcm9iZSAtIHdpdGggcmVwbHl0byBMQU5fR1c8L2Rlc2NyPgogICAgICA8ZGlyZWN0aW9uPmluPC9kaXJlY3Rpb24+CiAgICAgIDxyZXBseS10bz5MQU5fR1c8L3JlcGx5LXRvPgogICAgICA8bG9nPjE8L2xvZz4KICAgICAgPHF1aWNrPjE8L3F1aWNrPgogICAgICA8c291cmNlPgogICAgICAgIDxhZGRyZXNzPjE2OC42My4xMjkuMTY8L2FkZHJlc3M+CiAgICAgIDwvc291cmNlPgogICAgICA8ZGVzdGluYXRpb24+CiAgICAgICAgPG5ldHdvcms+bGFuaXA8L25ldHdvcms+CiAgICAgIDwvZGVzdGluYXRpb24+CiAgICAgIDx1cGRhdGVkPgogICAgICAgIDx1c2VybmFtZT5yb290QDEwLjAuMS43PC91c2VybmFtZT4KICAgICAgICA8dGltZT4xNjM2MTI2NjMzLjY4NjQ8L3RpbWU+CiAgICAgICAgPGRlc2NyaXB0aW9uPi9maXJld2FsbF9ydWxlc19lZGl0LnBocCBtYWRlIGNoYW5nZXM8L2Rlc2NyaXB0aW9uPgogICAgICA8L3VwZGF0ZWQ+CiAgICAgIDxjcmVhdGVkPgogICAgICAgIDx1c2VybmFtZT5yb290QDEwLjAuMS43PC91c2VybmFtZT4KICAgICAgICA8dGltZT4xNjM2MTI1NzQ1LjgwOTg8L3RpbWU+CiAgICAgICAgPGRlc2NyaXB0aW9uPi9maXJld2FsbF9ydWxlc19lZGl0LnBocCBtYWRlIGNoYW5nZXM8L2Rlc2NyaXB0aW9uPgogICAgICA8L2NyZWF0ZWQ+CiAgICA8L3J1bGU+CiAgICA8cnVsZT4KICAgICAgPHR5cGU+cGFzczwvdHlwZT4KICAgICAgPGludGVyZmFjZT5sYW48L2ludGVyZmFjZT4KICAgICAgPGlwcHJvdG9jb2w+aW5ldDwvaXBwcm90b2NvbD4KICAgICAgPHN0YXRldHlwZT5rZWVwIHN0YXRlPC9zdGF0ZXR5cGU+CiAgICAgIDxkZXNjcj5hbnRpLWxvY2tvdXQgLSBEb250IGRlbGV0ZSBvciBjcmVhdGUgcnVsZXMgYmVmb3JlIHRoaXMgb25lPC9kZXNjcj4KICAgICAgPGRpcmVjdGlvbj5pbjwvZGlyZWN0aW9uPgogICAgICA8bG9nPjE8L2xvZz4KICAgICAgPHF1aWNrPjE8L3F1aWNrPgogICAgICA8c291cmNlPgogICAgICAgIDxuZXR3b3JrPmxhbjwvbmV0d29yaz4KICAgICAgPC9zb3VyY2U+CiAgICAgIDxkZXN0aW5hdGlvbj4KICAgICAgICA8bmV0d29yaz5sYW5pcDwvbmV0d29yaz4KICAgICAgPC9kZXN0aW5hdGlvbj4KICAgICAgPHVwZGF0ZWQ+CiAgICAgICAgPHVzZXJuYW1lPnJvb3RAMTAuMC4xLjc8L3VzZXJuYW1lPgogICAgICAgIDx0aW1lPjE2MzYxNDYyMjIuMzczNDwvdGltZT4KICAgICAgICA8ZGVzY3JpcHRpb24+L2ZpcmV3YWxsX3J1bGVzX2VkaXQucGhwIG1hZGUgY2hhbmdlczwvZGVzY3JpcHRpb24+CiAgICAgIDwvdXBkYXRlZD4KICAgICAgPGNyZWF0ZWQ+CiAgICAgICAgPHVzZXJuYW1lPnJvb3RAMTAuMC4xLjc8L3VzZXJuYW1lPgogICAgICAgIDx0aW1lPjE2MzYxMjY1MjMuNjcxPC90aW1lPgogICAgICAgIDxkZXNjcmlwdGlvbj4vZmlyZXdhbGxfcnVsZXNfZWRpdC5waHAgbWFkZSBjaGFuZ2VzPC9kZXNjcmlwdGlvbj4KICAgICAgPC9jcmVhdGVkPgogICAgPC9ydWxlPgogICAgPHJ1bGU+CiAgICAgIDx0eXBlPnBhc3M8L3R5cGU+CiAgICAgIDxpbnRlcmZhY2U+bGFuPC9pbnRlcmZhY2U+CiAgICAgIDxpcHByb3RvY29sPmluZXQ8L2lwcHJvdG9jb2w+CiAgICAgIDxzdGF0ZXR5cGU+a2VlcCBzdGF0ZTwvc3RhdGV0eXBlPgogICAgICA8ZGVzY3I+QWxsb3cgRmlyZXdhbGwgTWFuYWdlbWVudCBXaW5kb3dzLVZNLVN1Ym5ldDwvZGVzY3I+CiAgICAgIDxkaXJlY3Rpb24+aW48L2RpcmVjdGlvbj4KICAgICAgPGxvZz4xPC9sb2c+CiAgICAgIDxxdWljaz4xPC9xdWljaz4KICAgICAgPHNvdXJjZT4KICAgICAgICA8YWRkcmVzcz5XaW5kb3dzVk1TdWJuZXQ8L2FkZHJlc3M+CiAgICAgIDwvc291cmNlPgogICAgICA8ZGVzdGluYXRpb24+CiAgICAgICAgPG5ldHdvcms+bGFuaXA8L25ldHdvcms+CiAgICAgIDwvZGVzdGluYXRpb24+CiAgICAgIDx1cGRhdGVkPgogICAgICAgIDx1c2VybmFtZT5yb290QDEwLjAuMS43PC91c2VybmFtZT4KICAgICAgICA8dGltZT4xNjUwNTY5Njg3LjQ3OTQ8L3RpbWU+CiAgICAgICAgPGRlc2NyaXB0aW9uPi9maXJld2FsbF9ydWxlc19lZGl0LnBocCBtYWRlIGNoYW5nZXM8L2Rlc2NyaXB0aW9uPgogICAgICA8L3VwZGF0ZWQ+CiAgICAgIDxjcmVhdGVkPgogICAgICAgIDx1c2VybmFtZT5yb290QDEwLjAuMS43PC91c2VybmFtZT4KICAgICAgICA8dGltZT4xNjUwNTY5Njg3LjQ3OTQ8L3RpbWU+CiAgICAgICAgPGRlc2NyaXB0aW9uPi9maXJld2FsbF9ydWxlc19lZGl0LnBocCBtYWRlIGNoYW5nZXM8L2Rlc2NyaXB0aW9uPgogICAgICA8L2NyZWF0ZWQ+CiAgICA8L3J1bGU+CiAgICA8cnVsZT4KICAgICAgPHR5cGU+cGFzczwvdHlwZT4KICAgICAgPGludGVyZmFjZT5sYW48L2ludGVyZmFjZT4KICAgICAgPGlwcHJvdG9jb2w+aW5ldDwvaXBwcm90b2NvbD4KICAgICAgPHN0YXRldHlwZT5rZWVwIHN0YXRlPC9zdGF0ZXR5cGU+CiAgICAgIDxkZXNjcj5BbGxvdyBXaW5kb3dzLVZNLVN1Ym5ldCBJbnRlcm5ldCBBY2Nlc3M8L2Rlc2NyPgogICAgICA8ZGlyZWN0aW9uPmluPC9kaXJlY3Rpb24+CiAgICAgIDxsb2c+MTwvbG9nPgogICAgICA8cXVpY2s+MTwvcXVpY2s+CiAgICAgIDxzb3VyY2U+CiAgICAgICAgPGFkZHJlc3M+V2luZG93c1ZNU3VibmV0PC9hZGRyZXNzPgogICAgICA8L3NvdXJjZT4KICAgICAgPGRlc3RpbmF0aW9uPgogICAgICAgIDxhbnk+MTwvYW55PgogICAgICA8L2Rlc3RpbmF0aW9uPgogICAgICA8dXBkYXRlZD4KICAgICAgICA8dXNlcm5hbWU+cm9vdEAxMC4wLjEuNzwvdXNlcm5hbWU+CiAgICAgICAgPHRpbWU+MTY1MDU3MDc3MS41ODMyPC90aW1lPgogICAgICAgIDxkZXNjcmlwdGlvbj4vZmlyZXdhbGxfcnVsZXNfZWRpdC5waHAgbWFkZSBjaGFuZ2VzPC9kZXNjcmlwdGlvbj4KICAgICAgPC91cGRhdGVkPgogICAgICA8Y3JlYXRlZD4KICAgICAgICA8dXNlcm5hbWU+cm9vdEAxMC4wLjEuNzwvdXNlcm5hbWU+CiAgICAgICAgPHRpbWU+MTY1MDU3MDc3MS41ODMyPC90aW1lPgogICAgICAgIDxkZXNjcmlwdGlvbj4vZmlyZXdhbGxfcnVsZXNfZWRpdC5waHAgbWFkZSBjaGFuZ2VzPC9kZXNjcmlwdGlvbj4KICAgICAgPC9jcmVhdGVkPgogICAgPC9ydWxlPgogICAgPHJ1bGU+CiAgICAgIDx0eXBlPnBhc3M8L3R5cGU+CiAgICAgIDxpcHByb3RvY29sPmluZXQ8L2lwcHJvdG9jb2w+CiAgICAgIDxkZXNjcj5EZWZhdWx0IGFsbG93IExBTiB0byBhbnkgcnVsZTwvZGVzY3I+CiAgICAgIDxpbnRlcmZhY2U+bGFuPC9pbnRlcmZhY2U+CiAgICAgIDxzb3VyY2U+CiAgICAgICAgPG5ldHdvcms+bGFuPC9uZXR3b3JrPgogICAgICA8L3NvdXJjZT4KICAgICAgPGRlc3RpbmF0aW9uPgogICAgICAgIDxhbnkvPgogICAgICA8L2Rlc3RpbmF0aW9uPgogICAgPC9ydWxlPgogIDwvZmlsdGVyPgogIDxycmQ+CiAgICA8ZW5hYmxlLz4KICA8L3JyZD4KICA8bG9hZF9iYWxhbmNlcj4KICAgIDxtb25pdG9yX3R5cGU+CiAgICAgIDxuYW1lPklDTVA8L25hbWU+CiAgICAgIDx0eXBlPmljbXA8L3R5cGU+CiAgICAgIDxkZXNjcj5JQ01QPC9kZXNjcj4KICAgICAgPG9wdGlvbnMvPgogICAgPC9tb25pdG9yX3R5cGU+CiAgICA8bW9uaXRvcl90eXBlPgogICAgICA8bmFtZT5UQ1A8L25hbWU+CiAgICAgIDx0eXBlPnRjcDwvdHlwZT4KICAgICAgPGRlc2NyPkdlbmVyaWMgVENQPC9kZXNjcj4KICAgICAgPG9wdGlvbnMvPgogICAgPC9tb25pdG9yX3R5cGU+CiAgICA8bW9uaXRvcl90eXBlPgogICAgICA8bmFtZT5IVFRQPC9uYW1lPgogICAgICA8dHlwZT5odHRwPC90eXBlPgogICAgICA8ZGVzY3I+R2VuZXJpYyBIVFRQPC9kZXNjcj4KICAgICAgPG9wdGlvbnM+CiAgICAgICAgPHBhdGg+LzwvcGF0aD4KICAgICAgICA8aG9zdC8+CiAgICAgICAgPGNvZGU+MjAwPC9jb2RlPgogICAgICA8L29wdGlvbnM+CiAgICA8L21vbml0b3JfdHlwZT4KICAgIDxtb25pdG9yX3R5cGU+CiAgICAgIDxuYW1lPkhUVFBTPC9uYW1lPgogICAgICA8dHlwZT5odHRwczwvdHlwZT4KICAgICAgPGRlc2NyPkdlbmVyaWMgSFRUUFM8L2Rlc2NyPgogICAgICA8b3B0aW9ucz4KICAgICAgICA8cGF0aD4vPC9wYXRoPgogICAgICAgIDxob3N0Lz4KICAgICAgICA8Y29kZT4yMDA8L2NvZGU+CiAgICAgIDwvb3B0aW9ucz4KICAgIDwvbW9uaXRvcl90eXBlPgogICAgPG1vbml0b3JfdHlwZT4KICAgICAgPG5hbWU+U01UUDwvbmFtZT4KICAgICAgPHR5cGU+c2VuZDwvdHlwZT4KICAgICAgPGRlc2NyPkdlbmVyaWMgU01UUDwvZGVzY3I+CiAgICAgIDxvcHRpb25zPgogICAgICAgIDxzZW5kLz4KICAgICAgICA8ZXhwZWN0PjIyMCAqPC9leHBlY3Q+CiAgICAgIDwvb3B0aW9ucz4KICAgIDwvbW9uaXRvcl90eXBlPgogIDwvbG9hZF9iYWxhbmNlcj4KICA8d2lkZ2V0cz4KICAgIDxzZXF1ZW5jZT5zeXN0ZW1faW5mb3JtYXRpb24tY29udGFpbmVyOjAwMDAwMDAwLWNvbDM6c2hvdyxzZXJ2aWNlc19zdGF0dXMtY29udGFpbmVyOjAwMDAwMDAxLWNvbDQ6c2hvdyxnYXRld2F5cy1jb250YWluZXI6MDAwMDAwMDItY29sNDpzaG93LGludGVyZmFjZV9saXN0LWNvbnRhaW5lcjowMDAwMDAwMy1jb2w0OnNob3c8L3NlcXVlbmNlPgogICAgPGNvbHVtbl9jb3VudD4yPC9jb2x1bW5fY291bnQ+CiAgPC93aWRnZXRzPgogIDxyZXZpc2lvbj4KICAgIDx1c2VybmFtZT5yb290QDE4Ny4xNDMuMzcuNTE8L3VzZXJuYW1lPgogICAgPHRpbWU+MTUwMzc1NTUyNS42MzY4PC90aW1lPgogICAgPGRlc2NyaXB0aW9uPi9zeXN0ZW1fZ2VuZXJhbC5waHAgbWFkZSBjaGFuZ2VzPC9kZXNjcmlwdGlvbj4KICA8L3JldmlzaW9uPgogIDxPUE5zZW5zZT4KICAgIDxjYXB0aXZlcG9ydGFsIHZlcnNpb249IjEuMC4wIj4KICAgICAgPHpvbmVzLz4KICAgICAgPHRlbXBsYXRlcy8+CiAgICA8L2NhcHRpdmVwb3J0YWw+CiAgICA8Y3JvbiB2ZXJzaW9uPSIxLjAuMCI+CiAgICAgIDxqb2JzLz4KICAgIDwvY3Jvbj4KICAgIDxOZXRmbG93IHZlcnNpb249IjEuMC4wIj4KICAgICAgPGNhcHR1cmU+CiAgICAgICAgPGludGVyZmFjZXMvPgogICAgICAgIDxlZ3Jlc3Nfb25seT53YW48L2VncmVzc19vbmx5PgogICAgICAgIDx2ZXJzaW9uPnY5PC92ZXJzaW9uPgogICAgICAgIDx0YXJnZXRzLz4KICAgICAgPC9jYXB0dXJlPgogICAgICA8Y29sbGVjdD4KICAgICAgICA8ZW5hYmxlPjA8L2VuYWJsZT4KICAgICAgPC9jb2xsZWN0PgogICAgPC9OZXRmbG93PgogICAgPElEUyB2ZXJzaW9uPSIxLjAuMCI+CiAgICAgIDxydWxlcy8+CiAgICAgIDx1c2VyRGVmaW5lZFJ1bGVzLz4KICAgICAgPGZpbGVzLz4KICAgICAgPGZpbGVUYWdzLz4KICAgICAgPGdlbmVyYWw+CiAgICAgICAgPGVuYWJsZWQ+MDwvZW5hYmxlZD4KICAgICAgICA8aXBzPjA8L2lwcz4KICAgICAgICA8cHJvbWlzYz4wPC9wcm9taXNjPgogICAgICAgIDxpbnRlcmZhY2VzPndhbjwvaW50ZXJmYWNlcz4KICAgICAgICA8ZGVmYXVsdFBhY2tldFNpemUvPgogICAgICAgIDxVcGRhdGVDcm9uLz4KICAgICAgICA8QWxlcnRMb2dyb3RhdGU+VzBEMjM8L0FsZXJ0TG9ncm90YXRlPgogICAgICAgIDxBbGVydFNhdmVMb2dzPjQ8L0FsZXJ0U2F2ZUxvZ3M+CiAgICAgICAgPE1QTUFsZ28+YWM8L01QTUFsZ28+CiAgICAgICAgPHN5c2xvZz4wPC9zeXNsb2c+CiAgICAgIDwvZ2VuZXJhbD4KICAgIDwvSURTPgogICAgPHByb3h5IHZlcnNpb249IjEuMC4wIj4KICAgICAgPGdlbmVyYWw+CiAgICAgICAgPGVuYWJsZWQ+MDwvZW5hYmxlZD4KICAgICAgICA8aWNwUG9ydC8+CiAgICAgICAgPGxvZ2dpbmc+CiAgICAgICAgICA8ZW5hYmxlPgogICAgICAgICAgICA8YWNjZXNzTG9nPjE8L2FjY2Vzc0xvZz4KICAgICAgICAgICAgPHN0b3JlTG9nPjE8L3N0b3JlTG9nPgogICAgICAgICAgPC9lbmFibGU+CiAgICAgICAgICA8aWdub3JlTG9nQUNMLz4KICAgICAgICAgIDx0YXJnZXQvPgogICAgICAgIDwvbG9nZ2luZz4KICAgICAgICA8YWx0ZXJuYXRlRE5Tc2VydmVycy8+CiAgICAgICAgPGRuc1Y0Rmlyc3Q+MDwvZG5zVjRGaXJzdD4KICAgICAgICA8Zm9yd2FyZGVkRm9ySGFuZGxpbmc+b248L2ZvcndhcmRlZEZvckhhbmRsaW5nPgogICAgICAgIDx1cmlXaGl0ZXNwYWNlSGFuZGxpbmc+c3RyaXA8L3VyaVdoaXRlc3BhY2VIYW5kbGluZz4KICAgICAgICA8dXNlVmlhSGVhZGVyPjE8L3VzZVZpYUhlYWRlcj4KICAgICAgICA8c3VwcHJlc3NWZXJzaW9uPjA8L3N1cHByZXNzVmVyc2lvbj4KICAgICAgICA8VmlzaWJsZUVtYWlsPmFkbWluQGxvY2FsaG9zdC5sb2NhbDwvVmlzaWJsZUVtYWlsPgogICAgICAgIDxWaXNpYmxlSG9zdG5hbWU+bG9jYWxob3N0PC9WaXNpYmxlSG9zdG5hbWU+CiAgICAgICAgPGNhY2hlPgogICAgICAgICAgPGxvY2FsPgogICAgICAgICAgICA8ZW5hYmxlZD4wPC9lbmFibGVkPgogICAgICAgICAgICA8ZGlyZWN0b3J5Pi92YXIvc3F1aWQvY2FjaGU8L2RpcmVjdG9yeT4KICAgICAgICAgICAgPGNhY2hlX21lbT4yNTY8L2NhY2hlX21lbT4KICAgICAgICAgICAgPG1heGltdW1fb2JqZWN0X3NpemUvPgogICAgICAgICAgICA8c2l6ZT4xMDA8L3NpemU+CiAgICAgICAgICAgIDxsMT4xNjwvbDE+CiAgICAgICAgICAgIDxsMj4yNTY8L2wyPgogICAgICAgICAgPC9sb2NhbD4KICAgICAgICA8L2NhY2hlPgogICAgICAgIDx0cmFmZmljPgogICAgICAgICAgPGVuYWJsZWQ+MDwvZW5hYmxlZD4KICAgICAgICAgIDxtYXhEb3dubG9hZFNpemU+MjA0ODwvbWF4RG93bmxvYWRTaXplPgogICAgICAgICAgPG1heFVwbG9hZFNpemU+MTAyNDwvbWF4VXBsb2FkU2l6ZT4KICAgICAgICAgIDxPdmVyYWxsQmFuZHdpZHRoVHJvdHRlbGluZz4xMDI0PC9PdmVyYWxsQmFuZHdpZHRoVHJvdHRlbGluZz4KICAgICAgICAgIDxwZXJIb3N0VHJvdHRlbGluZz4yNTY8L3Blckhvc3RUcm90dGVsaW5nPgogICAgICAgIDwvdHJhZmZpYz4KICAgICAgPC9nZW5lcmFsPgogICAgICA8Zm9yd2FyZD4KICAgICAgICA8aW50ZXJmYWNlcz5sYW48L2ludGVyZmFjZXM+CiAgICAgICAgPHBvcnQ+MzEyODwvcG9ydD4KICAgICAgICA8c3NsYnVtcHBvcnQ+MzEyOTwvc3NsYnVtcHBvcnQ+CiAgICAgICAgPHNzbGJ1bXA+MDwvc3NsYnVtcD4KICAgICAgICA8c3NsdXJsb25seT4wPC9zc2x1cmxvbmx5PgogICAgICAgIDxzc2xjZXJ0aWZpY2F0ZS8+CiAgICAgICAgPHNzbG5vYnVtcHNpdGVzLz4KICAgICAgICA8c3NsX2NydGRfc3RvcmFnZV9tYXhfc2l6ZT40PC9zc2xfY3J0ZF9zdG9yYWdlX21heF9zaXplPgogICAgICAgIDxzc2xjcnRkX2NoaWxkcmVuPjU8L3NzbGNydGRfY2hpbGRyZW4+CiAgICAgICAgPGZ0cEludGVyZmFjZXMvPgogICAgICAgIDxmdHBQb3J0PjIxMjE8L2Z0cFBvcnQ+CiAgICAgICAgPGZ0cFRyYW5zcGFyZW50TW9kZT4wPC9mdHBUcmFuc3BhcmVudE1vZGU+CiAgICAgICAgPGFkZEFDTGZvckludGVyZmFjZVN1Ym5ldHM+MTwvYWRkQUNMZm9ySW50ZXJmYWNlU3VibmV0cz4KICAgICAgICA8dHJhbnNwYXJlbnRNb2RlPjA8L3RyYW5zcGFyZW50TW9kZT4KICAgICAgICA8YWNsPgogICAgICAgICAgPGFsbG93ZWRTdWJuZXRzLz4KICAgICAgICAgIDx1bnJlc3RyaWN0ZWQvPgogICAgICAgICAgPGJhbm5lZEhvc3RzLz4KICAgICAgICAgIDx3aGl0ZUxpc3QvPgogICAgICAgICAgPGJsYWNrTGlzdC8+CiAgICAgICAgICA8YnJvd3Nlci8+CiAgICAgICAgICA8bWltZVR5cGUvPgogICAgICAgICAgPHNhZmVQb3J0cz44MDpodHRwLDIxOmZ0cCw0NDM6aHR0cHMsNzA6Z29waGVyLDIxMDp3YWlzLDEwMjUtNjU1MzU6dW5yZWdpc3RlcmVkIHBvcnRzLDI4MDpodHRwLW1nbXQsNDg4Omdzcy1odHRwLDU5MTpmaWxlbWFrZXIsNzc3Om11bHRpbGluZyBodHRwPC9zYWZlUG9ydHM+CiAgICAgICAgICA8c3NsUG9ydHM+NDQzOmh0dHBzPC9zc2xQb3J0cz4KICAgICAgICAgIDxyZW1vdGVBQ0xzPgogICAgICAgICAgICA8YmxhY2tsaXN0cy8+CiAgICAgICAgICAgIDxVcGRhdGVDcm9uLz4KICAgICAgICAgIDwvcmVtb3RlQUNMcz4KICAgICAgICA8L2FjbD4KICAgICAgICA8aWNhcD4KICAgICAgICAgIDxlbmFibGU+MDwvZW5hYmxlPgogICAgICAgICAgPFJlcXVlc3RVUkw+aWNhcDovLzEyNy4wLjAuMS9yZXFtb2Q8L1JlcXVlc3RVUkw+CiAgICAgICAgICA8UmVzcG9uc2VVUkw+aWNhcDovLzEyNy4wLjAuMS9yZXNwbW9kPC9SZXNwb25zZVVSTD4KICAgICAgICAgIDxTZW5kQ2xpZW50SVA+MTwvU2VuZENsaWVudElQPgogICAgICAgICAgPFNlbmRVc2VybmFtZT4wPC9TZW5kVXNlcm5hbWU+CiAgICAgICAgICA8RW5jb2RlVXNlcm5hbWU+MDwvRW5jb2RlVXNlcm5hbWU+CiAgICAgICAgICA8VXNlcm5hbWVIZWFkZXI+WC1Vc2VybmFtZTwvVXNlcm5hbWVIZWFkZXI+CiAgICAgICAgICA8RW5hYmxlUHJldmlldz4xPC9FbmFibGVQcmV2aWV3PgogICAgICAgICAgPFByZXZpZXdTaXplPjEwMjQ8L1ByZXZpZXdTaXplPgogICAgICAgICAgPE9wdGlvbnNUVEw+NjA8L09wdGlvbnNUVEw+CiAgICAgICAgPC9pY2FwPgogICAgICAgIDxhdXRoZW50aWNhdGlvbj4KICAgICAgICAgIDxtZXRob2QvPgogICAgICAgICAgPHJlYWxtPk9QTnNlbnNlIHByb3h5IGF1dGhlbnRpY2F0aW9uPC9yZWFsbT4KICAgICAgICAgIDxjcmVkZW50aWFsc3R0bD4yPC9jcmVkZW50aWFsc3R0bD4KICAgICAgICAgIDxjaGlsZHJlbj41PC9jaGlsZHJlbj4KICAgICAgICA8L2F1dGhlbnRpY2F0aW9uPgogICAgICA8L2ZvcndhcmQ+CiAgICA8L3Byb3h5PgogICAgPFRyYWZmaWNTaGFwZXIgdmVyc2lvbj0iMS4wLjEiPgogICAgICA8cGlwZXMvPgogICAgICA8cXVldWVzLz4KICAgICAgPHJ1bGVzLz4KICAgIDwvVHJhZmZpY1NoYXBlcj4KICAgIDxGaXJld2FsbD4KICAgICAgPEx2dGVtcGxhdGUgdmVyc2lvbj0iMC4wLjEiPgogICAgICAgIDx0ZW1wbGF0ZXMvPgogICAgICA8L0x2dGVtcGxhdGU+CiAgICAgIDxDYXRlZ29yeSB2ZXJzaW9uPSIxLjAuMCI+CiAgICAgICAgPGNhdGVnb3JpZXMvPgogICAgICA8L0NhdGVnb3J5PgogICAgICA8QWxpYXMgdmVyc2lvbj0iMS4wLjAiPgogICAgICAgIDxnZW9pcD4KICAgICAgICAgIDx1cmwvPgogICAgICAgIDwvZ2VvaXA+CiAgICAgICAgPGFsaWFzZXM+CiAgICAgICAgICA8YWxpYXMgdXVpZD0iNjM3MDYzYTYtOTA5ZC00NTQ0LWIyYWMtYzg4M2E5ZWE5N2U0Ij4KICAgICAgICAgICAgPGVuYWJsZWQ+MTwvZW5hYmxlZD4KICAgICAgICAgICAgPG5hbWU+V2luZG93c1ZNU3VibmV0PC9uYW1lPgogICAgICAgICAgICA8dHlwZT5uZXR3b3JrPC90eXBlPgogICAgICAgICAgICA8cHJvdG8vPgogICAgICAgICAgICA8Y291bnRlcnM+MDwvY291bnRlcnM+CiAgICAgICAgICAgIDx1cGRhdGVmcmVxLz4KICAgICAgICAgICAgPGNvbnRlbnQ+enp6Lnp6ei56enouenp6PC9jb250ZW50PgogICAgICAgICAgICA8ZGVzY3JpcHRpb24vPgogICAgICAgICAgPC9hbGlhcz4KICAgICAgICA8L2FsaWFzZXM+CiAgICAgIDwvQWxpYXM+CiAgICA8L0ZpcmV3YWxsPgogIDwvT1BOc2Vuc2U+CiAgPGNlcnQ+CiAgICA8cmVmaWQ+NTk4MTAyNTAwZjM1NTwvcmVmaWQ+CiAgICA8ZGVzY3I+V2ViIEdVSSBTU0wgY2VydGlmaWNhdGU8L2Rlc2NyPgogICAgPGNydD5MUzB0TFMxQ1JVZEpUaUJEUlZKVVNVWkpRMEZVUlMwdExTMHRDazFKU1VaaWVrTkRRVEZsWjBGM1NVSkJaMGxLUVV4Q2FEQlpVR0U1TDFGMFRVRXdSME5UY1VkVFNXSXpSRkZGUWtOM1ZVRk5SVFI0UTNwQlNrSm5UbFlLUWtGWlZFRnJOVTFOVWxWM1JYZFpSRlpSVVVsRVFYaGhaRmRzYTB4VmFIWmlSM2hvWW0xUmVFWlVRVlJDWjA1V1FrRmpUVVJGTVhCYVIxSnNZa2RvYUFwamJUVndZM3BGVWsxQk9FZEJNVlZGUTJkM1NWUXhRazlqTWxaMVl6SlZkMGhvWTA1TlZHTjNUMFJCZUUxcVNYcE9ha0Y0VjJoalRrMVVaM2RQUkVGNENrMXFTWHBPYWtGNFYycENUMDFSYzNkRFVWbEVWbEZSUjBWM1NrOVVSRVZXVFVKTlIwRXhWVVZEUVhkTlYyNVdjRnBETVVsaU1uaHpXVmMxYTAxU1ZYY0tSWGRaUkZaUlVVaEVRWGhPWVZkU2ExcFhlRzlaV0VwMVlWaE5lRVZVUVZCQ1owNVdRa0Z2VFVORk9WRlViazVzWW01T2JFMUpTVU5KYWtGT1FtZHJjUXBvYTJsSE9YY3dRa0ZSUlVaQlFVOURRV2M0UVUxSlNVTkRaMHREUVdkRlFYUXlZVmh3UlhSdldqUmxaWGw2TTJSNFFsUnBhQzlXY1ZwTlMyOUlNMlpDQ200NVUxaDBSRk15UWxKalZFcHlMM0oyYml0eWFGTlRUbk40VUhGdWVsaE1VV0ZJY3pKUlJ6VXZUVVJwYkhKcmRIaDFUa05zVEZOeGVXUXliVGx0YjNrS1JGbGhSbXg2YzBJd2NtNHdZVzU1U0hWd05IZEpjbEJuYTNBeVkxWTNkbGxwY2xSb1VVOU9SMHBJTVRSamFGUktOM0pPT1RKUGFHTjNTeko0Y2xadldRcHZibHB1Y1ZZelZXeG1kR3AyTTFkNlNtdHhVeXRqTkhsMVVuUlJWRE5wY2pnek9YWk1SMU5pTW1sVlpHUjBLMHhyYmpKT1QyZDVPV2xLVWpCNGFFWjJDbGMzVUhwaksyOUhUMWx6YzJsV2JWcGhZVXBVWkRKaFdHZDVaaTlETVRKbk5VSjJZVGxNYzNWNWFVVjBaRUZXYlhreloyNTNXbGxvVFVab05YZFRSRWtLT0ZoSFlYTlFhR2xoVEdkWGRYbGpWMnRoYkRSYWIwOHJZWE5PTHpOa2RqRXZhR0pPTWt4TmEyMW1TbFJrVXpsSWMwZDBNbmh5WjNWeGF6bGlMM00zTVFwRVdsZGhVWFkzYkd4TlNsTkJPRXgzYWpsd04yTTNSMUY2UlV0MlRqUlROWEJEUjBSWFlqQkdVVkp2Tms5RmVGVjFObEF3VmpGMk0xbHpkRUZYYVRsTENsaDFOemxVU1dsUVZtVnlaVFoxWlhKU055dFJPV2RLUkVObGQyb3JXVXhtUmt4UU5HRjRaM2d3TVhsdmFFUnpZbWR4YWxOU2RrNVBWVzEyWkZaMFNFTUtXbU55VVRCWlpVMWpUbmhQZEZCeVZXbHdjR0pLV1ZwQ2R6ZzRiRkJ3WmpCSmJXdElhWGswTkhnM1l6ZzRjbVZYUkZWd2JFSkVVekZGUldka1RIQklVZ3BtYWxWQldWaG5NM2xRVEhWQlJGaDJZelV4V2tsQ1RXZDNjMjV1UzJsUGFYSnVaMFpKZUVOM01FZFpiM1IwWldwTGVtaDNXVzVQWTFadWNqaHFTRTFtQ2s5MFRuZzBNRFZHV25SNmJFaHVUM2g0YkZncmFIbGxNMk5VUlRoTlEyOUJNWG8wUjBSWGNrdHNlWFpMUmtJNVdHRjNlRkZIZFRCbUwzcDJjMXBSYzNrS1VtaEdiRTlCT1VWSmRGVkRRWGRGUVVGaFRsRk5SVFIzU0ZGWlJGWlNNRTlDUWxsRlJrRmhXREJvUTNSRFoxRkRlVTlLVURaSE5XOHhkMVY0Vm5wWmRncE5RamhIUVRGVlpFbDNVVmxOUW1GQlJrRmhXREJvUTNSRFoxRkRlVTlLVURaSE5XOHhkMVY0Vm5wWmRrMUJkMGRCTVZWa1JYZFJSazFCVFVKQlpqaDNDa1JSV1VwTGIxcEphSFpqVGtGUlJVeENVVUZFWjJkSlFrRkxRbWRrUldoS1VsaElNR2hOV0dkdmFuZEhPVEpxTjAweVQzWTFURkZWVkhSSFRrTlFTRzhLVUZreUwwZHBiMGh1WnpNNGRGRlZVMWxaWjFWb1ZrRktjbGRWUkZkU1ZsQlJOVVpNZG1RcldEUmpORzlaZGtsMVZXSXZZMDFSYmtwSVpqTmFUekZHVlFwQmF6bHVTRXREV1VzMGNHRjNORko1TUZaa1JFSnFlWHBhYjJ0SVpFUlNZMnMzZEhjeVkzb3ZOMjFGYTBGTFpXOHpZbGc1UVd4SVZYbE1PVlJvUXpKeUNsWkdTSEk0WjJSeGNrSk9TMWxoY21VdlpXUnlaMmxCYUdVd1JtUnpWWGQ0VTFCUFNFaFRUMHRMTDNkTU0wbDFiMlpsY1V4WFpWUkxUSGxwTm14S2NuZ0tVM3BNUmpJNFNTOVdNWGN4WlRab2NYbDJXSE5EUTFaUFpXdFdTRmhCTVUxcGFXdHZjRlJUVm5Cb09EQkRlR2g1YkZZeE5WSTVWM2Q1ZEdSeFJsY3ZPQXBFVkRseFZFWjNlbkJhVERCclJrdzJiSFZsTkhGc1IwUlpiVk53U1VreVkyMVJTaXRFYlhWYU1teHFUblJZZDJsMGRIaFpiMU5pVWtkU2JtOW9kaTlZQ21aT2QxbEhWV1kyVUU1aVdrMTNhVEUyVUhKamVXMUhjMUJETUhoQ1VGZFVaRU5DVjA5VVExYzVkR3BCWVVSNFVuVmpWMWhtVDBFeFQyazJhaTlNTVRrS01GRkxiVlJZV1hKSk9IWTBWRWhwWWtOUU5uZFpObE5MZEM5bmNGQlJRbkpqZDFCaFVrUnZaRWRxTVRsdmRITkhNRGxDWlhBMmVWbHFjMVZSWjNGSlVBcEVaMFJWYVZaRWJtUjFObk5XVUZKa1VrdDZVMjVzWjFoNGRXcFpkSFl6SzBGWmVXRk1VMVZYU3pFMlNuSnJXRlYxTDBGd0wwMHlUM0p0ZWpWUFNHVnVDbEkwUVRNNVpUazFWbFZ1UjNVMmFWVmpRVGgxUjJKaWMxWkJkR2RFYkVaaFZqTkhNRFl3Vkc5RmIxaHFNa1JOUm5ZNVprVTVZMnN4V0ZsclRXeFJSSGNLVm5WMFNtdFRjell2SzBWbVkySTViV3BETTBWYU5rMUJVWEZTUW5GVk5GTjVaRGxMZUROVGMzQlhSVk0wSzNWQk1FMXZVREpJTml0RlNEVlFhbGRtTUFwUGEyOWhDaTB0TFMwdFJVNUVJRU5GVWxSSlJrbERRVlJGTFMwdExTMEs8L2NydD4KICAgIDxwcnY+TFMwdExTMUNSVWRKVGlCUVVrbFdRVlJGSUV0RldTMHRMUzB0Q2sxSlNVcFJkMGxDUVVSQlRrSm5hM0ZvYTJsSE9YY3dRa0ZSUlVaQlFWTkRRMU13ZDJkbmEzQkJaMFZCUVc5SlEwRlJRek5hY0dWclV6Sm9ibWcxTjB3S1VHUXpSVVpQUzBnNVYzQnJkM0ZuWm1RNFIyWXhTbVV3VGt4WlJrWjRUVzEySzNVclpqWjFSa3BKTW5wRkszRm1UbU4wUW05bGVscEJZbTQ0ZDA5TFZ3cDFVek5ITkRCTFZYUkxja296WVdJeVlXcEpUbWh2VjFoUGQwaFRkV1pTY1daSlpUWnVha0ZwY3l0RFUyNWFlRmgxT1dsTGRFOUdRVFF3V1d0bVdHaDVDa1pOYm5Wek16TlpOa1o2UVhKaVIzUlhhR2xwWkcxbGNGaGtVMVlyTWs4dlpHSk5iVk53VERWNmFrczFSekZDVUdWTGRucG1Namh6V2twMllVcFNNVElLTXpSMVUyWlpNRFpFVERKSmJFaFVSMFZYT1dKekwwNTZObWRaTldsNWVVcFhXbXh3YjJ4T00xcHdaVVJLTHpoTVdHRkVhMGM1Y2pCMWVUZExTVk14TUFwQ1YySk1aVU5tUW14cFJYZFhTRzVDU1UxcWVHTmFjWGNyUjBwdmRVSmhOMHA0WVZKeFdHaHRaemMxY1hjekwyUXlMMWdyUm5NeldYTjVVMW80YkU0eENrd3daWGRoTTJKSGRVTTJjVlF4ZGl0NmRsVk9iRnB3UXk5MVYxVjNiRWxFZDNaRFVESnVkSHB6V2tSTlVYRTRNMmhNYld0SldVNWFkbEZXUWtkcWJ6UUtWRVpUTjI4dlVsaFhMMlJwZVRCQ1lVd3djR1UzZGpGTmFVazVWalowTjNFMU5uUklkalZFTWtGclRVbzNRMUExWjNRNFZYTXZhSEpIUkVoVVdFdHBSUXBQZUhWRGNVNUtSemd3TlZOaE9URlhNR05LYkhsMFJGSm9OSGgzTTBVMk1DdDBVMHR0YkhOc2FHdElSSHA1VlN0c0wxRnBZVkZsVEV4cWFraDBlbnA1Q25RMVdVNVRiVlZGVGt4VlVWTkNNSFZyWkVZclRsRkNhR1ZFWmtrNGRUUkJUbVU1ZW01V2EyZEZlVVJEZVdWamNVazJTM1ZsUVZWcVJVeEVVVnBwYVRJS01UWk5jazlJUW1sak5YaFhaWFo1VFdONE9EWXdNMGhxVkd0V2JUTlBWV1ZqTjBoSFZtWTJTRW8zWkhoTlZIZDNTMmRFV0ZCbldVNWhjM0ZZU3podlZRcElNV1J5UkVaQllUZFNMeTlQSzNoc1EzcEtSMFZYVlRSRU1GRnBNVkZKUkVGUlFVSkJiMGxEUVVjemNDdFhXRWx1TjJrd1lXWkhjV3RVWTB4M1ZIWXdDbFpEUVhoSVUzUkhlbGM0Y0hKUlYyVk9XbmhXVjA4dk0xRTJWREo0VDJaV2IxZHhOblV2YkZFNWVFUk9jRGRJYVhaQlIwUTFRV2x4TUVsdFN5dEJUa0lLVWpjMFZuSm9UM1ZVTTAxV2RGRnBUMjQyWjFsT1EybENiVFpMTTFoWFptVXpLemxsYzBNeFVXTm9WMjVGTDNsalpWSlJlbU5xVlVWNWIxUmFXVGh1VlFwalNXOHhWSFV2ZVhWRFRHUjZXVU5QYzBoS01uRkVRVGx5VUVZNE4yaHllV1pwYlRjclpWTXpSVWMyZEdGQldqSkJXVmMyYVhFNFRXbEplSGd6UjNJeUNqWmllSEZLU2xnd1MzZFpUbXRvUm1SS2RpOXFjbVo0WmtNelpHOW9jR1JtYWpsNFZqUjRPUzl5U1Zsd1VEUTRLMmN5Y3pKbFVsRTBha2xRVXpkb2FYa0tSR2N2TkZwdVptUlhla05CWjJ4SlptVnVUVU5MVUZabVJuTkxWR2swYmpneVQydEtXVFVyYlZSUldreDVia0prTlUxcGVXd3hkalo1ZGpoeVYwcElOZ3BOT0UwdlRtMXRiemxtV1VSM1JsQnRXVVpEYTBobE0wcERjakZvZDJGS1dXSmFXbVpLY0VWTE9XeExjbnBrT1dOcGJIZEJMMlpuVjB3NU1VRjJjRm96Q214cVUwd3hWRGxrUW5rME1tMHhSbmM1SzJkSVlsZHRibEpUUkM4dlJrTktZa0ZrWldjeWNHczRjM3AwVmtSUFFYbHlhWFp4VnpGNFozVkJTRVJJYVZJS01VVTRWMFJpTm1GMVEzVjJhRWMzUzFWblVVTjVhREZCUWpJNVpXWnRWRWsxUzNjclJHNUdiVE4wVmpsamNGQnVia2haV21OUU1WRjFWU3MxUzNaTVZ3cHVNVzAwWTFweVlsaE9RbWhxWTA1RWMzVnFSM0F3ZFUxQmNXUlZSR0Y1Wm01RlRXNWFPRVYxUkdNeWVIUnRUREp2WmpWTFVsUkdTUzg1UjJ3dlMyOUxDbm94WVRVNGNGSldlRGx6UWxsYVdIRlhlblZTWjNKR2VETXhaalEyZWxCNVowVndXakZaYlRrM0syMVZOMGRFYUZOSWVta3hRWGg0VVdRMGVFbEhPV29LT1hCRllsUmpSVzgzWjJGTldESlNZamhTY0RsQmIwbENRVkZFYUU5VVZscElZU3R1U0c1b2FETjRSblZwVXpGWWVuVnhZbTFIVEhrM2VYZE9kVVZZU3dwQ1drNVNhV1ZzUkZSNVZIVmFTMmN6WlZWaFJrTXdSMnR0UVRSUGRtOVlWR0ZMUm5aYU4wNWhUbkpzTm05RmRUUjBkRXhVVVRGWVdURnRjM05zVDNOdkNsWmtOaXRVZURkeVNWVlNUMWROY25kWldWRTFSMnRIS3paTVFsaG1WSGx4WWpsbE5WazNhSE4yTkdRM1JuRmhNRGxMVUc5eGRHSndVMWRHTTFWclN5OEtXV0pMYlZWTWJqQXZXRmh5TUdoR2VFUXljMlZIUzBOMlNUSndTbGt3TnpoUGNqa3hSRE5wUjNjMFEwWnBkek5DY0ZaVFIxbG5Wa2Q1Y25ZM2JIZE1XZ296YTNBMmNWTlNlbkZLU2xNNGNESmpiVFF5V0RsVFVuSnZXVVpPTlVFMWFqTmFUa0ZXUjNoUGVYTktTamw1ZDB4dmMyOUZjMGQ0VWpFemMyNW1VVXhFQ205SVYydExWbVI2WkVsS1ZWTkphV2MwT0dWaGFrNVpjVlJxZEZCNU1YSk1NRGhIVjBzNVdtZEliVXBwSzNCWllrRnZTVUpCVVVSUlpHeGFUbGxrYUdFS1dYVlNVa3gwWkd0V2NHbDZZalpuUWs1Sk9IZHNPSFpSWkVWSGQza3lRbGMzZVhFM1pWUmpPRlExVUVwWGNERkZaazl0U1ZwblNuZFhka2RyWTNSdVRRcHpTSFJHZUZKVVpqQlhaRU01VDJOVmRGRXZXRFZuZFZsbllpdFFOMHgwTjFOaVJrSmFTblpRU3prNFJGSXZNVEJEUTNCaVNpOXJSMm93WjJaamNqZGlDa2hGVHprMmRYaHNWMFZHWWpsTmVWcDBXbGRzU1ZaNE1IUlZjblV4VG1WS1JVdGhVMjAwVFRkeU0zYzBaVGN3VFVveFkzazJTVkZMY205M1FXRXhRVVlLZVU5YWQwOUZlRUpGUkZCNllVOTBhRE42VlhaamQyZEZMM1ZQZEZSTFdVZzFUWFJ3TUhWU1QxUjFiblp2UWxGdFR6aDNORWg1T1hGd0x6aHBaR05IV0FwMGJsZHBTR0pNZW1OWGRDdG1UbmR5WldOTk9EZDZORVpRZEU1SmNqUmhheTlJVDI0dlJIZFFlWFJQTlZONldtVm9SV2swTlhWVFZuaDBjRGhCVmxCeENtUkpOMlV2SzBORlRtNXVVRUZ2U1VKQlJFaDFTR1EyV1hwNlZYTmplVWN6WXpCVVprVnVaRkl2ZGpkd2NFbzBXVEprY0dONlRsRkNjMjEzTUU0NGRHUUtVVEpITmxoUVUxaGFWVkJtWmk5cUsxbE1aSGxGTTJOUWVtbEtSbWxwVW04eE1uWlNSalZvYlhBMGVVRmtRWEY2Vm0xVk1ubHVPVkp6YVZSamJ6UXdZUW92WlhGcmEzSkZRak5YT1ZCWE9UTXpPV2RuWmxWd1EzbGFUUzlNZUV4dlVFb3ZhbTk0TmtvNFZHTTBjQ3RoVlZWVFNrSk5XVEZJVFZabEt6ZEhPRFowQ2xacVVXMXBVV3haYTNKWVJWaG1UVll4WkRGYVREaDVTazVoU3psQlJYQlpSWGxyU0RjNEwweFhSbUpIWVd0alRXTlBjRkY1ZVdkRWRVNHhRMjVFYzNJS01YVjVaWEp6VW0xVk9XbHdWbmcyY0ZkdFNYSlBaV3d6TWsxdk9VeFNiVEp3TmxsQlRIWnhVbG94Ym5ONGMySkxSRFZ3YzJjeU1XUkxSbVI0WkhSeE5BcHlTMEZGZVVreGNXdG1hVFJYYXpWamN6VmtORVJNVURsVFVVTkRlbGMzV0hKYVdXd3lXbk5EWjJkRlFrRkxURVpCTjFsQlVrWkxka1JPT1cweE55ODRDamRrWVU1NFNIcE5ZMVpJWWpsTlUySlJaaXQwYWxabVZDOHlXRXQ2UW5CSVpVaHRjMU13WjBNd1RWa3dRVWwxUTA0eFVGVmhZMDkwZFZaT1RrRXpUMUFLY1dwV1ducEhWV0Y1TTJkcmJ6aEZPRGRxY1U4cloxUlhSVnBYYUROU1lubG9iblZzV200eVNFMXhkR2xzYzNSTllsZENRVEZGTVRVd1JuTnRXamxpY1FwQ2JqWnhjMjFqUTNCbmJqazVjR05oVWpWM1kycFFOekZDVm5STlIycG5jMWRoTkhkNkwyZENZamxFVFZKUE1tbFNTMkV2U2tGcFoxTlhOSFZTZW5jeUNsUndiM04yYWpNMVlubHVVbWM1TWtOMVNIWkZZMWtyVVZWc1VXRXlla1phTlUxbE5rVnZSMWxDTW13Mk1FTmtWR0phSzFkdGMyRXZURlJMWTFKbVNsa0tRMVJ6UjJVeFRtNURPRGd3WW5oVWFHSldRUzh6WWpWT1kwaEZiVkJwSzBkcE4wMVBlWHBGV2pCVU5uVTJjVlZaVlRscGJtOU5TbU54U1VoMlFWaDFOZ3B1V0d0RFoyZEZRa0ZKZVRadFRFcEJkVGhLVVdkUlkwSkVTRVpMTlZvNVQybFpPRTV0ZDB4d2RuWk1hMlpVUTBwU2NtTkdiMjFoZHpoWk16WXdWeXRUQ204MFdEQkpja2R0YlZaVk1uaFpaamsyY2tWWlJIcGxMME0yUVZkNWMzbDBiMFZZUWxkdE9YaHBSbUpNZUVoU2VGSmxMelJqV1hkMlpuWlBlRkJZTmxVS2JYcHZkMFpVVm1scVMyTlJSRFJwZG5ReU9VZHlORTFFY0hOUVJuUjJNelkzZDNkdmMxWnpPWEZyVlVSWFUycEJkVUl6TWxadlFYcFFhbFJHYVVveFJncG9kMkpEZGpoeVJqUlpMMUF6WWtoeVluSlRNMmhCTWt0cFF6UllTRTVxUVc1dlpHVldiMXBGUm1OblQwZDBNRTRyVXpoWWRFTm5OMHRUYWpSeGVrNTJDbGhhVGtsWE1HbFJVMFpxT0RsNVRrMUJVRmxOTVdWaE1VTXdhMlZFYmtwelF6ZFFTSE4yZW5GQ2JWSjVPR1pQUkdNMFRXRk1ValpQWm1OVlVrTlJiRmdLVlcxWVIzUktRMlZPVlZOdFpWVXJSSFpUVjBjNGVtNXJNR3N3WlZVeFJUMEtMUzB0TFMxRlRrUWdVRkpKVmtGVVJTQkxSVmt0TFMwdExRbz08L3Bydj4KICA8L2NlcnQ+CiAgPHBwcHMvPgogIDxuYXQ+CiAgICA8b3V0Ym91bmQ+CiAgICAgIDxydWxlPgogICAgICAgIDxpbnRlcmZhY2U+d2FuPC9pbnRlcmZhY2U+CiAgICAgICAgPHNvdXJjZT4KICAgICAgICAgIDxuZXR3b3JrPjEyNy4wLjAuMC84PC9uZXR3b3JrPgogICAgICAgIDwvc291cmNlPgogICAgICAgIDxkc3Rwb3J0PjUwMDwvZHN0cG9ydD4KICAgICAgICA8dGFyZ2V0Lz4KICAgICAgICA8ZGVzdGluYXRpb24+CiAgICAgICAgICA8YW55PjE8L2FueT4KICAgICAgICA8L2Rlc3RpbmF0aW9uPgogICAgICAgIDxzdGF0aWNuYXRwb3J0PjE8L3N0YXRpY25hdHBvcnQ+CiAgICAgICAgPGRlc2NyPkF1dG8gY3JlYXRlZCBydWxlIGZvciBJU0FLTVAgLSBsb2NhbGhvc3QgLSZndDsgV0FOPC9kZXNjcj4KICAgICAgICA8Y3JlYXRlZD4KICAgICAgICAgIDx1c2VybmFtZT5yb290QDE3Mi4xNS4xLjU8L3VzZXJuYW1lPgogICAgICAgICAgPHRpbWU+MTUwMTcwMTU4Mi4wMDU2PC90aW1lPgogICAgICAgICAgPGRlc2NyaXB0aW9uPi9maXJld2FsbF9uYXRfb3V0LnBocCBtYWRlIGNoYW5nZXM8L2Rlc2NyaXB0aW9uPgogICAgICAgIDwvY3JlYXRlZD4KICAgICAgPC9ydWxlPgogICAgICA8cnVsZT4KICAgICAgICA8aW50ZXJmYWNlPndhbjwvaW50ZXJmYWNlPgogICAgICAgIDxzb3VyY2U+CiAgICAgICAgICA8bmV0d29yaz4xMjcuMC4wLjAvODwvbmV0d29yaz4KICAgICAgICA8L3NvdXJjZT4KICAgICAgICA8c291cmNlcG9ydC8+CiAgICAgICAgPHRhcmdldC8+CiAgICAgICAgPGRlc3RpbmF0aW9uPgogICAgICAgICAgPGFueT4xPC9hbnk+CiAgICAgICAgPC9kZXN0aW5hdGlvbj4KICAgICAgICA8bmF0cG9ydC8+CiAgICAgICAgPGRlc2NyPkF1dG8gY3JlYXRlZCBydWxlIC0gbG9jYWxob3N0IC0mZ3Q7IFdBTjwvZGVzY3I+CiAgICAgICAgPGNyZWF0ZWQ+CiAgICAgICAgICA8dXNlcm5hbWU+cm9vdEAxNzIuMTUuMS41PC91c2VybmFtZT4KICAgICAgICAgIDx0aW1lPjE1MDE3MDE1ODIuMDA1NzwvdGltZT4KICAgICAgICAgIDxkZXNjcmlwdGlvbj4vZmlyZXdhbGxfbmF0X291dC5waHAgbWFkZSBjaGFuZ2VzPC9kZXNjcmlwdGlvbj4KICAgICAgICA8L2NyZWF0ZWQ+CiAgICAgICAgPGRzdHBvcnQvPgogICAgICA8L3J1bGU+CiAgICAgIDxydWxlPgogICAgICAgIDxzb3VyY2U+CiAgICAgICAgICA8bmV0d29yaz5XaW5kb3dzVk1TdWJuZXQ8L25ldHdvcms+CiAgICAgICAgPC9zb3VyY2U+CiAgICAgICAgPGRlc3RpbmF0aW9uPgogICAgICAgICAgPGFueT4xPC9hbnk+CiAgICAgICAgPC9kZXN0aW5hdGlvbj4KICAgICAgICA8ZGVzY3I+TkFUIFdpbmRvd3MtVk0tU3VibmV0PC9kZXNjcj4KICAgICAgICA8Y2F0ZWdvcnkvPgogICAgICAgIDxpbnRlcmZhY2U+d2FuPC9pbnRlcmZhY2U+CiAgICAgICAgPHRhZy8+CiAgICAgICAgPHRhZ2dlZC8+CiAgICAgICAgPHBvb2xvcHRzLz4KICAgICAgICA8cG9vbG9wdHNfc291cmNlaGFzaGtleS8+CiAgICAgICAgPGlwcHJvdG9jb2w+aW5ldDwvaXBwcm90b2NvbD4KICAgICAgICA8Y3JlYXRlZD4KICAgICAgICAgIDx1c2VybmFtZT5yb290QDEwLjAuMS43PC91c2VybmFtZT4KICAgICAgICAgIDx0aW1lPjE2NTA1Njk5MjkuNDMyNTwvdGltZT4KICAgICAgICAgIDxkZXNjcmlwdGlvbj4vZmlyZXdhbGxfbmF0X291dF9lZGl0LnBocCBtYWRlIGNoYW5nZXM8L2Rlc2NyaXB0aW9uPgogICAgICAgIDwvY3JlYXRlZD4KICAgICAgICA8dGFyZ2V0PndhbmlwPC90YXJnZXQ+CiAgICAgICAgPHNvdXJjZXBvcnQvPgogICAgICAgIDx1cGRhdGVkPgogICAgICAgICAgPHVzZXJuYW1lPnJvb3RAMTAuMC4xLjc8L3VzZXJuYW1lPgogICAgICAgICAgPHRpbWU+MTY1MDU3MDAwNi45NDcxPC90aW1lPgogICAgICAgICAgPGRlc2NyaXB0aW9uPi9maXJld2FsbF9uYXRfb3V0X2VkaXQucGhwIG1hZGUgY2hhbmdlczwvZGVzY3JpcHRpb24+CiAgICAgICAgPC91cGRhdGVkPgogICAgICA8L3J1bGU+CiAgICAgIDxtb2RlPmh5YnJpZDwvbW9kZT4KICAgIDwvb3V0Ym91bmQ+CiAgPC9uYXQ+CiAgPGdhdGV3YXlzPgogICAgPGdhdGV3YXlfaXRlbT4KICAgICAgPGludGVyZmFjZT5sYW48L2ludGVyZmFjZT4KICAgICAgPGdhdGV3YXk+eXl5Lnl5eS55eXkueXl5PC9nYXRld2F5PgogICAgICA8bmFtZT5MQU5fR1c8L25hbWU+CiAgICAgIDxwcmlvcml0eT4yNTU8L3ByaW9yaXR5PgogICAgICA8d2VpZ2h0PjE8L3dlaWdodD4KICAgICAgPGlwcHJvdG9jb2w+aW5ldDwvaXBwcm90b2NvbD4KICAgICAgPGludGVydmFsLz4KICAgICAgPGRlc2NyLz4KICAgICAgPG1vbml0b3JfZGlzYWJsZT4xPC9tb25pdG9yX2Rpc2FibGU+CiAgICA8L2dhdGV3YXlfaXRlbT4KICA8L2dhdGV3YXlzPgo8L29wbnNlbnNlPg==",
+                    "$fxv#2": "IiIiQXp1cmUncyBJUHY0IHN1Ym5ldCBnYXRld2F5IGlzIG5ldHdvcmsgYWRkcmVzcyArIDEgKGNvbnN0YW50IG1lbW9yeSkuIiIiCmltcG9ydCBpcGFkZHJlc3MKaW1wb3J0IHN5cwoKCmRlZiBnYXRld2F5KGNpZHIpOgogICAgbmV0d29yayA9IGlwYWRkcmVzcy5JUHY0TmV0d29yayhjaWRyLCBzdHJpY3Q9VHJ1ZSkKICAgIGlmIG5ldHdvcmsucHJlZml4bGVuID4gMjk6CiAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigiQXp1cmUgc3VibmV0cyBtdXN0IGJlIC8yOSBvciBsYXJnZXIiKQogICAgcmV0dXJuIHN0cihuZXR3b3JrLm5ldHdvcmtfYWRkcmVzcyArIDEpCgoKaWYgX19uYW1lX18gPT0gIl9fbWFpbl9fIjoKICAgIHRyeToKICAgICAgICBpZiBsZW4oc3lzLmFyZ3YpICE9IDI6CiAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoIlVzYWdlOiBnZXRfbmljX2d3LnB5IDxJUHY0IHN1Ym5ldCBDSURSPiIpCiAgICAgICAgcHJpbnQoZ2F0ZXdheShzeXMuYXJndlsxXSkpCiAgICBleGNlcHQgVmFsdWVFcnJvciBhcyBleGM6CiAgICAgICAgc3lzLmV4aXQoc3RyKGV4YykpCg==",
+                    "$fxv#3": "IiIiVmFsaWRhdGUgaW5wdXRzIGFuZCBwcmVwYXJlIHRoZSBleGlzdGluZyBYTUwgZm9yIE9QTnNlbnNlJ3Mgb3duIG1pZ3JhdGlvbnMuIiIiCmltcG9ydCBoYXNobGliCmltcG9ydCBpcGFkZHJlc3MKaW1wb3J0IGpzb24KZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCByZQppbXBvcnQgc3lzCmltcG9ydCB4bWwuZXRyZWUuRWxlbWVudFRyZWUgYXMgRVQKCmZyb20gZ2V0X25pY19ndyBpbXBvcnQgZ2F0ZXdheQoKQk9PVFNUUkFQX0NPTU1JVCA9ICJkYjAxOGMzNWFhYzQ3MDIwYzY5ZGM1MDdjM2FlNjdhMzBkYmRmMmFiIgpCT09UU1RSQVBfU0hBMjU2ID0gImVkN2MwZDk3MzlmMzc1Y2M5NDFmYWI3ZDIzMDMzNzE3ZTFkZDE2YWEyNzU4ZmM4ZTU0NGNkYjRiOTBiNGY1N2MiCkNPUkVfQ09NTUlUID0gIjc5MTI4NmQ0ZGVjOGZmZWJhMzg0MTkwMWZmOTExMjljNjNkYjBhZjgiCgoKZGVmIHZhbGlkYXRlKHNldHRpbmdzKToKICAgIGlmIHNldHRpbmdzLmdldCgicm9sZSIpIG5vdCBpbiAoIlR3b05pY3MiLCAiUHJpbWFyeSIsICJTZWNvbmRhcnkiKSBvciBzZXR0aW5ncy5nZXQoIm9wblZlcnNpb24iKSAhPSAiMjYuNyI6CiAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigiU3VwcG9ydGVkIHJvbGVzOiBUd29OaWNzLCBQcmltYXJ5LCBTZWNvbmRhcnk7IE9QTnNlbnNlIHNlcmllczogMjYuNyIpCiAgICBpZiBub3QgcmUuZnVsbG1hdGNoKHIiaHR0cHM6Ly9bQS1aYS16MC05Ll9+Oi8lKy1dKy8iLCBzZXR0aW5nc1sic2NyaXB0VVJJIl0pOgogICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoInNjcmlwdFVSSSBtdXN0IGJlIGFuIEhUVFBTIGRpcmVjdG9yeSBVUkwiKQogICAgaWYgbm90IHJlLmZ1bGxtYXRjaChyIlswLTldKyg/OlwuWzAtOV0rKXsyLDN9Iiwgc2V0dGluZ3NbImFnZW50TWluaW11bVZlcnNpb24iXSk6CiAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigiSW52YWxpZCBtaW5pbXVtIGFnZW50IHZlcnNpb24iKQogICAgZ2F0ZXdheShzZXR0aW5nc1sidHJ1c3RlZFN1Ym5ldCJdKQogICAgd2luZG93cyA9IHNldHRpbmdzLmdldCgid2luZG93c1N1Ym5ldCIsICIiKQogICAgaWYgd2luZG93czoKICAgICAgICBnYXRld2F5KHdpbmRvd3MpCiAgICBpZiBzZXR0aW5nc1sicm9sZSJdICE9ICJUd29OaWNzIjoKICAgICAgICBwdWJsaWMgPSBpcGFkZHJlc3MuSVB2NEFkZHJlc3Moc2V0dGluZ3MuZ2V0KCJwdWJsaWNJUEFkZHJlc3MiLCAiIikpCiAgICAgICAgaWYgcHVibGljLmlzX3Vuc3BlY2lmaWVkIG9yIHB1YmxpYy5pc19tdWx0aWNhc3Q6CiAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoIkludmFsaWQgZXh0ZXJuYWwgbG9hZC1iYWxhbmNlciBJUHY0IGFkZHJlc3MiKQogICAgICAgIHN1Ym5ldCA9IGlwYWRkcmVzcy5JUHY0TmV0d29yayhzZXR0aW5nc1sidHJ1c3RlZFN1Ym5ldCJdKQogICAgICAgIGxvY2FsID0gaXBhZGRyZXNzLklQdjRBZGRyZXNzKHNldHRpbmdzLmdldCgibG9jYWxUcnVzdGVkSVAiLCAiIikpCiAgICAgICAgcGVlciA9IGlwYWRkcmVzcy5JUHY0QWRkcmVzcyhzZXR0aW5ncy5nZXQoInBlZXJUcnVzdGVkSVAiLCAiIikpCiAgICAgICAgZm9yIGFkZHJlc3MgaW4gKGxvY2FsLCBwZWVyKToKICAgICAgICAgICAgaWYgYWRkcmVzcyBub3QgaW4gc3VibmV0IG9yIG5vdCAoc3VibmV0Lm5ldHdvcmtfYWRkcmVzcyArIDMgPCBhZGRyZXNzIDwgc3VibmV0LmJyb2FkY2FzdF9hZGRyZXNzKToKICAgICAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoInBmc3luYyBhZGRyZXNzZXMgbXVzdCBiZSBhc3NpZ25hYmxlIGhvc3RzIGluIHRoZSB0cnVzdGVkIEF6dXJlIHN1Ym5ldCIpCiAgICAgICAgaWYgbG9jYWwgPT0gcGVlcjoKICAgICAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigicGZzeW5jIHBlZXIgbXVzdCBiZSBhIGRpZmZlcmVudCBub2RlIikKICAgIHJldHVybiBzZXR0aW5ncwoKCmRlZiBjb25maWdfZmlsZW5hbWUoc2V0dGluZ3MpOgogICAgcm9sZSA9IHZhbGlkYXRlKHNldHRpbmdzKVsicm9sZSJdCiAgICBpZiBzZXR0aW5ncy5nZXQoImhhIik6CiAgICAgICAgcmV0dXJuICJjb25maWcueG1sIgogICAgcmV0dXJuIHsiVHdvTmljcyI6ICJjb25maWcueG1sIiwgIlByaW1hcnkiOiAiY29uZmlnLWFjdGl2ZS1hY3RpdmUtcHJpbWFyeS54bWwiLAogICAgICAgICAgICAiU2Vjb25kYXJ5IjogImNvbmZpZy1hY3RpdmUtYWN0aXZlLXNlY29uZGFyeS54bWwifVtyb2xlXQoKCmRlZiByZW5kZXJfY29uZmlnKHNvdXJjZSwgc2V0dGluZ3MpOgogICAgc2V0dGluZ3MgPSB2YWxpZGF0ZShzZXR0aW5ncykKICAgIHdpbmRvd3MgPSBzZXR0aW5ncy5nZXQoIndpbmRvd3NTdWJuZXQiLCAiIikKICAgIHRleHQgPSBzb3VyY2UucmVwbGFjZSgieXl5Lnl5eS55eXkueXl5IiwgZ2F0ZXdheShzZXR0aW5nc1sidHJ1c3RlZFN1Ym5ldCJdKSkKICAgIHRleHQgPSB0ZXh0LnJlcGxhY2UoInp6ei56enouenp6Lnp6eiIsIHdpbmRvd3MpCiAgICB0ZXh0ID0gdGV4dC5yZXBsYWNlKCJ3d3cud3d3Lnd3dy53d3ciLCBzZXR0aW5ncy5nZXQoInB1YmxpY0lQQWRkcmVzcyIsICIiKSkKICAgIHRleHQgPSB0ZXh0LnJlcGxhY2UoInh4eC54eHgueHh4Lnh4eCIsIHNldHRpbmdzLmdldCgicGVlclRydXN0ZWRJUCIsICIiKSkKICAgIHJvb3QgPSBFVC5mcm9tc3RyaW5nKHRleHQpCiAgICBpZiByb290LnRhZyAhPSAib3Buc2Vuc2UiOgogICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoIk5vdCBhbiBPUE5zZW5zZSBjb25maWd1cmF0aW9uIikKICAgIHJvbGUgPSBzZXR0aW5nc1sicm9sZSJdCiAgICBpZiBzZXR0aW5ncy5nZXQoImhhIik6CiAgICAgICAgcm9vdC5maW5kKCJzeXN0ZW0vaG9zdG5hbWUiKS50ZXh0ID0gIk9QTnNlbnNlLSIgKyBzZXR0aW5nc1siaGEiXVsibm9kZSJdCiAgICAgICAgc3lzdGVtID0gcm9vdC5maW5kKCJzeXN0ZW0iKQogICAgICAgIGZvciBkbnMgaW4gbGlzdChzeXN0ZW0uZmluZGFsbCgiZG5zc2VydmVyIikpOgogICAgICAgICAgICBzeXN0ZW0ucmVtb3ZlKGRucykKICAgICAgICBFVC5TdWJFbGVtZW50KHN5c3RlbSwgImRuc3NlcnZlciIpLnRleHQgPSAiMTY4LjYzLjEyOS4xNiIKICAgICAgICBpZiBzeXN0ZW0uZmluZCgiZG5zbG9jYWxob3N0IikgaXMgTm9uZToKICAgICAgICAgICAgRVQuU3ViRWxlbWVudChzeXN0ZW0sICJkbnNsb2NhbGhvc3QiKS50ZXh0ID0gIjEiCiAgICAgICAgZm9yIGlmYWNlIGluICgid2FuIiwgImxhbiIpOgogICAgICAgICAgICBydWxlID0gRVQuU3ViRWxlbWVudChyb290LmZpbmQoImZpbHRlciIpLCAicnVsZSIpCiAgICAgICAgICAgIGZvciB0YWcsIHZhbHVlIGluICgoInR5cGUiLCAicGFzcyIpLCAoImludGVyZmFjZSIsIGlmYWNlKSwgKCJpcHByb3RvY29sIiwgImluZXQiKSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICgicHJvdG9jb2wiLCAidGNwIiksICgiZGVzY3IiLCAiQXp1cmUgSEEgcm9sZSBwcm9iZSIpLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgKCJzdGF0ZXR5cGUiLCAia2VlcCBzdGF0ZSIpKToKICAgICAgICAgICAgICAgIEVULlN1YkVsZW1lbnQocnVsZSwgdGFnKS50ZXh0ID0gdmFsdWUKICAgICAgICAgICAgRVQuU3ViRWxlbWVudChFVC5TdWJFbGVtZW50KHJ1bGUsICJzb3VyY2UiKSwgImFkZHJlc3MiKS50ZXh0ID0gIjE2OC42My4xMjkuMTYiCiAgICAgICAgICAgIGRlc3RpbmF0aW9uID0gRVQuU3ViRWxlbWVudChydWxlLCAiZGVzdGluYXRpb24iKQogICAgICAgICAgICBFVC5TdWJFbGVtZW50KGRlc3RpbmF0aW9uLCAibmV0d29yayIpLnRleHQgPSBpZmFjZSArICJpcCIKICAgICAgICAgICAgRVQuU3ViRWxlbWVudChkZXN0aW5hdGlvbiwgInBvcnQiKS50ZXh0ID0gIjgwODAiCiAgICAgICAgICAgIGlmIGlmYWNlID09ICJsYW4iOgogICAgICAgICAgICAgICAgRVQuU3ViRWxlbWVudChydWxlLCAicmVwbHktdG8iKS50ZXh0ID0gIkxBTl9HVyIKICAgIGVsaWYgcm9sZSAhPSAiVHdvTmljcyI6CiAgICAgICAgcm9vdC5maW5kKCJzeXN0ZW0vaG9zdG5hbWUiKS50ZXh0ID0gZiJPUE5zZW5zZS17cm9sZX0iCiAgICAgICAgaGEgPSByb290LmZpbmQoImhhc3luYyIpCiAgICAgICAgaWYgaGEgaXMgTm9uZToKICAgICAgICAgICAgaGEgPSBFVC5TdWJFbGVtZW50KHJvb3QsICJoYXN5bmMiKQogICAgICAgICMgQm90aCBzaWRlcyBtdXN0IHNlbmQgcGZzeW5jIHRvIGEgdW5pY2FzdCBwZWVyOyBBenVyZSBkb2VzIG5vdCBjYXJyeSBtdWx0aWNhc3QuCiAgICAgICAgZm9yIHRhZywgdmFsdWUgaW4gKCgicGZzeW5jZW5hYmxlZCIsICJvbiIpLCAoInBmc3luY2ludGVyZmFjZSIsICJsYW4iKSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgKCJwZnN5bmNwZWVyaXAiLCBzZXR0aW5nc1sicGVlclRydXN0ZWRJUCJdKSk6CiAgICAgICAgICAgIG5vZGUgPSBoYS5maW5kKHRhZykKICAgICAgICAgICAgaWYgbm9kZSBpcyBOb25lOgogICAgICAgICAgICAgICAgbm9kZSA9IEVULlN1YkVsZW1lbnQoaGEsIHRhZykKICAgICAgICAgICAgbm9kZS50ZXh0ID0gdmFsdWUKICAgICAgICBpZiByb2xlID09ICJQcmltYXJ5IjoKICAgICAgICAgICAgaGEuZmluZCgic3luY2hyb25pemV0b2lwIikudGV4dCA9IHNldHRpbmdzWyJwZWVyVHJ1c3RlZElQIl0KICAgICAgICBlbHNlOgogICAgICAgICAgICAjIFRoZSBzZWNvbmRhcnkgc2VuZHMgc3RhdGVzLCBidXQgbmV2ZXIgcHVzaGVzIGNvbmZpZ3VyYXRpb24gYmFjay4KICAgICAgICAgICAgZm9yIG5vZGUgaW4gbGlzdChoYSk6CiAgICAgICAgICAgICAgICBpZiBub2RlLnRhZy5zdGFydHN3aXRoKCJzeW5jaHJvbml6ZSIpIG9yIG5vZGUudGFnIGluICgidXNlcm5hbWUiLCAicGFzc3dvcmQiKToKICAgICAgICAgICAgICAgICAgICBoYS5yZW1vdmUobm9kZSkKICAgIGlmIG5vdCB3aW5kb3dzOgogICAgICAgICMgUmVtb3ZlIHRoZSBvcHRpb25hbCBzdWJuZXQgYWxpYXMgYW5kIGV2ZXJ5IHJ1bGUgcmVmZXJlbmNpbmcgaXQuCiAgICAgICAgZm9yIHBhcmVudCBpbiByb290Lml0ZXIoKToKICAgICAgICAgICAgZm9yIGNoaWxkIGluIGxpc3QocGFyZW50KToKICAgICAgICAgICAgICAgIGlmIGNoaWxkLnRhZyBpbiAoInJ1bGUiLCAiYWxpYXMiKSBhbmQgYW55KAogICAgICAgICAgICAgICAgICAgIG5vZGUudGV4dCA9PSAiV2luZG93c1ZNU3VibmV0IiBmb3Igbm9kZSBpbiBjaGlsZC5pdGVyKCkKICAgICAgICAgICAgICAgICk6CiAgICAgICAgICAgICAgICAgICAgcGFyZW50LnJlbW92ZShjaGlsZCkKICAgIGVsc2U6CiAgICAgICAgIyBSZXR1cm4gdHJhZmZpYyBmb3IgYSBzZXBhcmF0ZSBtYW5hZ2VtZW50IHN1Ym5ldCBnb2VzIHZpYSBBenVyZSdzIExBTiBnYXRld2F5LgogICAgICAgIHJvdXRlcyA9IHJvb3QuZmluZCgic3RhdGljcm91dGVzIikKICAgICAgICBpZiByb3V0ZXMgaXMgTm9uZToKICAgICAgICAgICAgcm91dGVzID0gRVQuU3ViRWxlbWVudChyb290LCAic3RhdGljcm91dGVzIikKICAgICAgICByb3V0ZSA9IEVULlN1YkVsZW1lbnQocm91dGVzLCAicm91dGUiKQogICAgICAgIGZvciB0YWcsIHZhbHVlIGluICgoIm5ldHdvcmsiLCB3aW5kb3dzKSwgKCJnYXRld2F5IiwgIkxBTl9HVyIpLAogICAgICAgICAgICAgICAgICAgICAgICAgICAoImRlc2NyIiwgIkF6dXJlIG1hbmFnZW1lbnQgc3VibmV0IikpOgogICAgICAgICAgICBFVC5TdWJFbGVtZW50KHJvdXRlLCB0YWcpLnRleHQgPSB2YWx1ZQogICAgZm9yIG5hbWUsIGRldmljZSBpbiAoKCJ3YW4iLCAiaG4wIiksICgibGFuIiwgImhuMSIpKToKICAgICAgICBpZiByb290LmZpbmR0ZXh0KGYiaW50ZXJmYWNlcy97bmFtZX0vaWYiKSAhPSBkZXZpY2U6CiAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoZiJVbmV4cGVjdGVkIHtuYW1lfSBpbnRlcmZhY2UiKQogICAgIyBQcmVzZXJ2ZSB0aGUgb2xkIGNvbmZpZyB2ZXJzaW9uOiBPUE5zZW5zZSBtdXN0IHJ1biB0aGUgcmVhbCBtaWdyYXRpb25zLgogICAgcmVuZGVyZWQgPSBFVC50b3N0cmluZyhyb290LCBlbmNvZGluZz0idW5pY29kZSIpCiAgICBpZiByZS5zZWFyY2gociIoPzp4eHh8eXl5fHp6enx3d3cpXC4oPzp4eHh8eXl5fHp6enx3d3cpXC4iLCByZW5kZXJlZCk6CiAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigiVW5yZXNvbHZlZCBjb25maWd1cmF0aW9uIHBsYWNlaG9sZGVyIikKICAgIHJldHVybiAnPD94bWwgdmVyc2lvbj0iMS4wIj8+XG4nICsgcmVuZGVyZWQgKyAiXG4iCgoKZGVmIHBhdGNoX2Jvb3RzdHJhcChzb3VyY2UpOgogICAgaWYgaGFzaGxpYi5zaGEyNTYoc291cmNlKS5oZXhkaWdlc3QoKSAhPSBCT09UU1RSQVBfU0hBMjU2OgogICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoIkJvb3RzdHJhcCBjaGVja3N1bSBtaXNtYXRjaDsgcmVmdXNpbmcgdG8gbW9kaWZ5IG9yIGV4ZWN1dGUgaXQiKQogICAgdGV4dCA9IHNvdXJjZS5kZWNvZGUoKQogICAgcmVwbGFjZW1lbnRzID0gewogICAgICAgICdcdHJlYm9vdFxuJzogJ1x0OiAjIENhbGxlciByZWJvb3RzIG9ubHkgYWZ0ZXIgQXp1cmUgaW50ZWdyYXRpb24gaXMgaW5zdGFsbGVkLlxuJywKICAgICAgICAnU1VCRklMRT0ic3RhYmxlLyR7UkVMRUFTRX0iJzogZidTVUJGSUxFPSJ7Q09SRV9DT01NSVR9IicsCiAgICAgICAgJ1NVQkRJUj0ic3RhYmxlLSR7UkVMRUFTRX0iJzogZidTVUJESVI9IntDT1JFX0NPTU1JVH0iJywKICAgICAgICAnRlJFRUJTRD0iJSVGUkVFQlNEJSUiJzogJ0ZSRUVCU0Q9IjE1LjEiJywKICAgIH0KICAgIGZvciBvbGQsIG5ldyBpbiByZXBsYWNlbWVudHMuaXRlbXMoKToKICAgICAgICBpZiB0ZXh0LmNvdW50KG9sZCkgIT0gMToKICAgICAgICAgICAgcmFpc2UgVmFsdWVFcnJvcihmIlVuZXhwZWN0ZWQgYm9vdHN0cmFwIGxheW91dDoge29sZCFyfSIpCiAgICAgICAgdGV4dCA9IHRleHQucmVwbGFjZShvbGQsIG5ldykKICAgIGlmICJcbnNldCAtZVxuIiBub3QgaW4gdGV4dDoKICAgICAgICByYWlzZSBWYWx1ZUVycm9yKCJCb290c3RyYXAgbXVzdCByZXRhaW4gZmFpbC1mYXN0IGJlaGF2aW91ciIpCiAgICByZXR1cm4gdGV4dAoKCmlmIF9fbmFtZV9fID09ICJfX21haW5fXyI6CiAgICB3b3JrID0gUGF0aChzeXMuYXJndlsxXSkKICAgIHNldHRpbmdzID0gdmFsaWRhdGUoanNvbi5sb2Fkcygod29yayAvICJzZXR0aW5ncy5qc29uIikucmVhZF90ZXh0KCkpKQogICAgKHdvcmsgLyAiY29uZmlnLnJlbmRlcmVkLnhtbCIpLndyaXRlX3RleHQocmVuZGVyX2NvbmZpZygod29yayAvIGNvbmZpZ19maWxlbmFtZShzZXR0aW5ncykpLnJlYWRfdGV4dCgpLCBzZXR0aW5ncykpCiAgICAod29yayAvICJib290c3RyYXAuc2giKS53cml0ZV90ZXh0KHBhdGNoX2Jvb3RzdHJhcCgod29yayAvICJib290c3RyYXAudXBzdHJlYW0uc2giKS5yZWFkX2J5dGVzKCkpKQo=",
+                    "$fxv#4": "W3N0YXJ0XQpjb21tYW5kOnNlcnZpY2UKcGFyYW1ldGVyczp3YWFnZW50IHN0YXJ0CnR5cGU6c2NyaXB0Cm1lc3NhZ2U6c3RhcnRpbmcgd2FhZ2VudAoKW3N0b3BdCmNvbW1hbmQ6c2VydmljZQpwYXJhbWV0ZXJzOndhYWdlbnQgc3RvcAp0eXBlOnNjcmlwdAptZXNzYWdlOnN0b3BwaW5nIHdhYWdlbnQKCltyZXN0YXJ0XQpjb21tYW5kOnNlcnZpY2UKcGFyYW1ldGVyczp3YWFnZW50IHJlc3RhcnQKdHlwZTpzY3JpcHQKbWVzc2FnZTpyZXN0YXJ0aW5nIHdhYWdlbnQKCltzdGF0dXNdCmNvbW1hbmQ6c2VydmljZQpwYXJhbWV0ZXJzOndhYWdlbnQgc3RhdHVzCnR5cGU6c2NyaXB0X291dHB1dAptZXNzYWdlOnN0YXR1cyB3YWFnZW50",
+                    "$fxv#5": "IyEvYmluL3NoCiMgUmVhZC1vbmx5IGd1ZXN0IGNoZWNrczsgbm8gY2xhaW0gb2YgZW5kLXRvLWVuZCBWUE4gb3IgY2xpZW50IGNvbm5lY3Rpdml0eS4Kc2V0IC1ldQpQQVRIPS9zYmluOi9iaW46L3Vzci9zYmluOi91c3IvYmluOi91c3IvbG9jYWwvc2JpbjovdXNyL2xvY2FsL2JpbgpleHBvcnQgUEFUSApjYXNlICIkKG9wbnNlbnNlLXZlcnNpb24gLXYpIiBpbgogICAgMjYuNyopIDs7CiAgICAqKSBlY2hvICdVbmV4cGVjdGVkIE9QTnNlbnNlIHJlbGVhc2UnID4mMjsgZXhpdCAxIDs7CmVzYWMKY2FzZSAiJChmcmVlYnNkLXZlcnNpb24gLXUpIiBpbgogICAgMTUuMS1SRUxFQVNFKikgOzsKICAgICopIGVjaG8gJ1VuZXhwZWN0ZWQgRnJlZUJTRCB1c2Vyc3BhY2UnID4mMjsgZXhpdCAxIDs7CmVzYWMKY2FzZSAiJChmcmVlYnNkLXZlcnNpb24gLXIpIiBpbgogICAgMTUuMS1SRUxFQVNFKikgOzsKICAgICopIGVjaG8gJ1VuZXhwZWN0ZWQgcnVubmluZyBGcmVlQlNEIGtlcm5lbCcgPiYyOyBleGl0IDEgOzsKZXNhYwpmb3IgbmljIGluIGhuMCBobjE7IGRvCiAgICBpZmNvbmZpZyAiJG5pYyIgfCBncmVwIC1xICdpbmV0ICcKZG9uZQpyb3V0ZSAtbiBnZXQgZGVmYXVsdApzZXJ2aWNlIHdhYWdlbnQgb25lc3RhdHVzCi91c3IvbG9jYWwvc2Jpbi93YWFnZW50IC12ZXJzaW9uCiMgVmVyaWZ5IHRoYXQgdGhlIGFnZW50J3MgcGxhdGZvcm0gZW5kcG9pbnQgaXMgcmVhY2hhYmxlLCBub3Qgb25seSBpdHMgcHJvY2Vzcy4KZmV0Y2ggLVQgMTUgLW8gL2Rldi9udWxsICdodHRwOi8vMTY4LjYzLjEyOS4xNi8/Y29tcD12ZXJzaW9ucycKcGtnIGNoZWNrIC1kIC1hCnBncmVwIC14IGNvbmZpZ2QgPi9kZXYvbnVsbCB8fCBwZ3JlcCAtZiAnL3Vzci9sb2NhbC9vcG5zZW5zZS9zZXJ2aWNlL2NvbmZpZ2QucHknID4vZGV2L251bGwKc29ja3N0YXQgLTQgLWwgfCBhd2sgJyQ2IH4gLzo0NDMkLyB7IGZvdW5kPTEgfSBFTkQgeyBleGl0ICFmb3VuZCB9JwpwZmN0bCAtcyBpbmZvIHwgZ3JlcCAtcSAnU3RhdHVzOiBFbmFibGVkJwpvcG5zZW5zZS12ZXJzaW9uIC1hCmZyZWVic2QtdmVyc2lvbiAta3J1CnByaW50ZiAnTG9jYWwgT1BOc2Vuc2UgY2hlY2tzIHBhc3NlZC4gVmVyaWZ5IEhUVFBTIGFuZCByb3V0ZWQgY2xpZW50IHRyYWZmaWMgZXh0ZXJuYWxseS5cbicK",
+                    "$fxv#6": "IyEvdXNyL2xvY2FsL2Jpbi9weXRob24zCiIiIkFjdGl2ZS1iYWNrdXAgY29udHJvbGxlci4gRXh0ZXJuYWwgTlNHIGdhdGVzICsgZmluaXRlIGxlYXNlICsgaGFyZCBmZW5jaW5nLgoKT25seSBVRFAgVlBOIHNlcnZpY2VzIG9uIG5vbi1jb250cm9sIHBvcnRzIGFyZSBzdXBwb3J0ZWQuIE5vIHBlZXIgcG93ZXItb24uClN0YXRlIGlzIG5vdCBzeW5jaHJvbml6ZWQgVlBOIHNlc3Npb24gc3RhdGUuIFNlZSBkb2NzL2FjdGl2ZS1iYWNrdXAubWQuCiIiIgppbXBvcnQgYXJncGFyc2UKaW1wb3J0IGRhdGV0aW1lCmltcG9ydCBmY250bAppbXBvcnQgaHR0cC5zZXJ2ZXIKaW1wb3J0IGpzb24KaW1wb3J0IGxvZ2dpbmcKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmltcG9ydCBzaWduYWwKaW1wb3J0IHN1YnByb2Nlc3MKaW1wb3J0IHRocmVhZGluZwppbXBvcnQgdGltZQppbXBvcnQgdXJsbGliLmVycm9yCmltcG9ydCB1cmxsaWIucGFyc2UKaW1wb3J0IHVybGxpYi5yZXF1ZXN0CmltcG9ydCB1dWlkCgpMT0cgPSBsb2dnaW5nLmdldExvZ2dlcigib3BuYXp1cmUtaGEiKQpST09UID0gUGF0aCgiL2NvbmYvb3BuYXp1cmUtaGEiKQpMRUFTRV9TRUNPTkRTID0gNjAKU0FGRVRZX1NFQ09ORFMgPSAyMApBUk0gPSAiaHR0cHM6Ly9tYW5hZ2VtZW50LmF6dXJlLmNvbSIKCmNsYXNzIEF6dXJlOgogICAgZGVmIF9faW5pdF9fKHNlbGYsIGNvbmZpZyk6CiAgICAgICAgc2VsZi5jb25maWcgPSBjb25maWcKICAgICAgICBzZWxmLnRva2VucyA9IHt9CiAgICAgICAgIyBEbyBub3QgZm9yd2FyZCBJTURTIG9yIGJlYXJlciB0b2tlbnMgdGhyb3VnaCBlbnZpcm9ubWVudCBwcm94eSBzZXR0aW5ncy4KICAgICAgICBzZWxmLmh0dHAgPSB1cmxsaWIucmVxdWVzdC5idWlsZF9vcGVuZXIodXJsbGliLnJlcXVlc3QuUHJveHlIYW5kbGVyKHt9KSkKCiAgICBkZWYgdG9rZW4oc2VsZiwgcmVzb3VyY2UpOgogICAgICAgIGNhY2hlZCA9IHNlbGYudG9rZW5zLmdldChyZXNvdXJjZSkKICAgICAgICBpZiBjYWNoZWQgYW5kIGNhY2hlZFsxXSA+IHRpbWUudGltZSgpICsgMTIwOgogICAgICAgICAgICByZXR1cm4gY2FjaGVkWzBdCiAgICAgICAgcXVlcnkgPSB1cmxsaWIucGFyc2UudXJsZW5jb2RlKHsiYXBpLXZlcnNpb24iOiAiMjAxOC0wMi0wMSIsICJyZXNvdXJjZSI6IHJlc291cmNlLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAiY2xpZW50X2lkIjogc2VsZi5jb25maWdbImNsaWVudF9pZCJdfSkKICAgICAgICByZXF1ZXN0ID0gdXJsbGliLnJlcXVlc3QuUmVxdWVzdCgKICAgICAgICAgICAgImh0dHA6Ly8xNjkuMjU0LjE2OS4yNTQvbWV0YWRhdGEvaWRlbnRpdHkvb2F1dGgyL3Rva2VuPyIgKyBxdWVyeSwKICAgICAgICAgICAgaGVhZGVycz17Ik1ldGFkYXRhIjogInRydWUifSkKICAgICAgICB3aXRoIHNlbGYuaHR0cC5vcGVuKHJlcXVlc3QsIHRpbWVvdXQ9MykgYXMgcmVzcG9uc2U6CiAgICAgICAgICAgIGRhdGEgPSBqc29uLmxvYWQocmVzcG9uc2UpCiAgICAgICAgc2VsZi50b2tlbnNbcmVzb3VyY2VdID0gKGRhdGFbImFjY2Vzc190b2tlbiJdLCBpbnQoZGF0YVsiZXhwaXJlc19vbiJdKSkKICAgICAgICByZXR1cm4gZGF0YVsiYWNjZXNzX3Rva2VuIl0KCiAgICBkZWYgcmVxdWVzdChzZWxmLCBtZXRob2QsIHVybCwgcmVzb3VyY2UsIGhlYWRlcnM9Tm9uZSwgYm9keT1Ob25lKToKICAgICAgICBhdXRoID0geyJBdXRob3JpemF0aW9uIjogIkJlYXJlciAiICsgc2VsZi50b2tlbihyZXNvdXJjZSl9CiAgICAgICAgYXV0aC51cGRhdGUoaGVhZGVycyBvciB7fSkKICAgICAgICBpZiBib2R5IGlzIG5vdCBOb25lOgogICAgICAgICAgICBhdXRoWyJDb250ZW50LVR5cGUiXSA9ICJhcHBsaWNhdGlvbi9qc29uIgogICAgICAgIHJlcXVlc3QgPSB1cmxsaWIucmVxdWVzdC5SZXF1ZXN0KHVybCwgZGF0YT1qc29uLmR1bXBzKGJvZHkpLmVuY29kZSgpIGlmIGJvZHkgaXMgbm90IE5vbmUgZWxzZSAoYiIiIGlmIG1ldGhvZCBpbiAoIlBVVCIsICJQT1NUIikgZWxzZSBOb25lKSwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBoZWFkZXJzPWF1dGgsIG1ldGhvZD1tZXRob2QpCiAgICAgICAgd2l0aCBzZWxmLmh0dHAub3BlbihyZXF1ZXN0LCB0aW1lb3V0PTUpIGFzIHJlc3BvbnNlOgogICAgICAgICAgICByZXR1cm4gcmVzcG9uc2UuaGVhZGVycywgcmVzcG9uc2UucmVhZCgpCgogICAgZGVmIGJsb2Ioc2VsZiwgbWV0aG9kLCBxdWVyeT0iIiwgaGVhZGVycz1Ob25lKToKICAgICAgICBjb21tb24gPSB7IngtbXMtdmVyc2lvbiI6ICIyMDIzLTExLTAzIiwKICAgICAgICAgICAgICAgICAgIngtbXMtZGF0ZSI6IGRhdGV0aW1lLmRhdGV0aW1lLm5vdyhkYXRldGltZS50aW1lem9uZS51dGMpLnN0cmZ0aW1lKAogICAgICAgICAgICAgICAgICAgICAgIiVhLCAlZCAlYiAlWSAlSDolTTolUyBHTVQiKX0KICAgICAgICBjb21tb24udXBkYXRlKGhlYWRlcnMgb3Ige30pCiAgICAgICAgcmV0dXJuIHNlbGYucmVxdWVzdChtZXRob2QsIHNlbGYuY29uZmlnWyJibG9iX3VybCJdICsgcXVlcnksCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAiaHR0cHM6Ly9zdG9yYWdlLmF6dXJlLmNvbS8iLCBjb21tb24pCgogICAgZGVmIGVuc3VyZV9ibG9iKHNlbGYpOgogICAgICAgIHRyeToKICAgICAgICAgICAgc2VsZi5ibG9iKCJQVVQiLCBoZWFkZXJzPXsieC1tcy1ibG9iLXR5cGUiOiAiQmxvY2tCbG9iIiwgIklmLU5vbmUtTWF0Y2giOiAiKiJ9KQogICAgICAgIGV4Y2VwdCB1cmxsaWIuZXJyb3IuSFRUUEVycm9yIGFzIGVycm9yOgogICAgICAgICAgICAjIEV4aXN0aW5nIGJsb2IsIHBvc3NpYmx5IGxlYXNlZDogbmV2ZXIgb3ZlcndyaXRlIGl0LgogICAgICAgICAgICBpZiBlcnJvci5jb2RlIG5vdCBpbiAoNDA5LCA0MTIpOgogICAgICAgICAgICAgICAgcmFpc2UKICAgICAgICAgICAgc2VsZi5ibG9iKCJIRUFEIikgICMgVmVyaWZ5IHRoYXQgaXQgcmVhbGx5IGV4aXN0cyBhbmQgaXMgYWNjZXNzaWJsZS4KCiAgICBkZWYgbGVhc2Uoc2VsZiwgYWN0aW9uLCBsZWFzZV9pZCk6CiAgICAgICAgaGVhZGVycyA9IHsieC1tcy1sZWFzZS1hY3Rpb24iOiBhY3Rpb259CiAgICAgICAgaWYgYWN0aW9uID09ICJhY3F1aXJlIjoKICAgICAgICAgICAgaGVhZGVycy51cGRhdGUoeyJ4LW1zLXByb3Bvc2VkLWxlYXNlLWlkIjogbGVhc2VfaWQsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAieC1tcy1sZWFzZS1kdXJhdGlvbiI6IHN0cihMRUFTRV9TRUNPTkRTKX0pCiAgICAgICAgZWxzZToKICAgICAgICAgICAgaGVhZGVyc1sieC1tcy1sZWFzZS1pZCJdID0gbGVhc2VfaWQKICAgICAgICBzZWxmLmJsb2IoIlBVVCIsICI/Y29tcD1sZWFzZSIsIGhlYWRlcnMpCgogICAgZGVmIG93bmVyKHNlbGYpOgogICAgICAgIGhlYWRlcnMsIF8gPSBzZWxmLmJsb2IoIkhFQUQiKQogICAgICAgIHJldHVybiBoZWFkZXJzLmdldCgieC1tcy1tZXRhLW93bmVyIiwgIiIpCgogICAgZGVmIHNldF9vd25lcihzZWxmLCBvd25lciwgbGVhc2VfaWQpOgogICAgICAgIHNlbGYuYmxvYigiUFVUIiwgIj9jb21wPW1ldGFkYXRhIiwgeyJ4LW1zLWxlYXNlLWlkIjogbGVhc2VfaWQsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICJ4LW1zLW1ldGEtb3duZXIiOiBvd25lcn0pCgogICAgZGVmIHBvd2VyKHNlbGYsIGFjdGlvbik6CiAgICAgICAgcXVlcnkgPSAiP2FwaS12ZXJzaW9uPTIwMjQtMTEtMDEiCiAgICAgICAgaWYgYWN0aW9uID09ICJwb3dlck9mZiI6CiAgICAgICAgICAgIHF1ZXJ5ICs9ICImc2tpcFNodXRkb3duPXRydWUiCiAgICAgICAgcmV0dXJuIHNlbGYucmVxdWVzdCgiUE9TVCIsICJodHRwczovL21hbmFnZW1lbnQuYXp1cmUuY29tIiArCiAgICAgICAgICAgICAgICAgICAgICAgICAgICBzZWxmLmNvbmZpZ1sicGVlcl92bV9pZCJdICsgIi8iICsgYWN0aW9uICsgcXVlcnksCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAiaHR0cHM6Ly9tYW5hZ2VtZW50LmF6dXJlLmNvbS8iKQoKICAgIGRlZiBwZWVyX3N0YXRlKHNlbGYpOgogICAgICAgIF8sIGJvZHkgPSBzZWxmLnJlcXVlc3QoIkdFVCIsICJodHRwczovL21hbmFnZW1lbnQuYXp1cmUuY29tIiArCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBzZWxmLmNvbmZpZ1sicGVlcl92bV9pZCJdICsKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICIvaW5zdGFuY2VWaWV3P2FwaS12ZXJzaW9uPTIwMjQtMTEtMDEiLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgImh0dHBzOi8vbWFuYWdlbWVudC5henVyZS5jb20vIikKICAgICAgICBzdGF0ZXMgPSBbaXRlbVsiY29kZSJdIGZvciBpdGVtIGluIGpzb24ubG9hZHMoYm9keSkuZ2V0KCJzdGF0dXNlcyIsIFtdKQogICAgICAgICAgICAgICAgICBpZiBpdGVtWyJjb2RlIl0uc3RhcnRzd2l0aCgiUG93ZXJTdGF0ZS8iKV0KICAgICAgICByZXR1cm4gc3RhdGVzWzBdIGlmIHN0YXRlcyBlbHNlICJ1bmtub3duIgoKICAgIGRlZiBydWxlX3VybChzZWxmLCBuc2csIGRpcmVjdGlvbik6CiAgICAgICAgcmV0dXJuIEFSTSArIG5zZyArICIvc2VjdXJpdHlSdWxlcy9Xb3JrbG9hZC0iICsgZGlyZWN0aW9uICsgIj9hcGktdmVyc2lvbj0yMDIzLTA1LTAxIgoKICAgIGRlZiBnYXRlX2Nsb3NlZChzZWxmLCBuc2cpOgogICAgICAgIGZvciBkaXJlY3Rpb24gaW4gKCJJbmJvdW5kIiwgIk91dGJvdW5kIik6CiAgICAgICAgICAgIF8sIHJhdyA9IHNlbGYucmVxdWVzdCgiR0VUIiwgc2VsZi5ydWxlX3VybChuc2csIGRpcmVjdGlvbiksIEFSTSArICIvIikKICAgICAgICAgICAgcHJvcHMgPSBqc29uLmxvYWRzKHJhdylbInByb3BlcnRpZXMiXQogICAgICAgICAgICBpZiBwcm9wcy5nZXQoImFjY2VzcyIpICE9ICJEZW55IiBvciBwcm9wcy5nZXQoInByb3Zpc2lvbmluZ1N0YXRlIikgIT0gIlN1Y2NlZWRlZCI6CiAgICAgICAgICAgICAgICByZXR1cm4gRmFsc2UKICAgICAgICByZXR1cm4gVHJ1ZQoKICAgIGRlZiBnYXRlKHNlbGYsIG5zZywgb3BlbmVkLCBndWFyZD1sYW1iZGE6IE5vbmUpOgogICAgICAgICMgR3VhcmQgYmVmb3JlL2FmdGVyIGV2ZXJ5IHdyaXRlIGFuZCBwb2xsLiBDb21wbGV0ZWQgTlNHIHVwZGF0ZXMgZG8gbm90CiAgICAgICAgIyB0ZXJtaW5hdGUgb2xkIGZsb3dzOiBmZW5jaW5nIGlzIHN0aWxsIG1hbmRhdG9yeSBvbiBldmVyeSB0YWtlb3Zlci4KICAgICAgICBkaXJlY3Rpb25zID0gKCJPdXRib3VuZCIsICJJbmJvdW5kIikgaWYgb3BlbmVkIGVsc2UgKCJJbmJvdW5kIiwgIk91dGJvdW5kIikKICAgICAgICBmb3IgZGlyZWN0aW9uIGluIGRpcmVjdGlvbnM6CiAgICAgICAgICAgIGd1YXJkKCkKICAgICAgICAgICAgcHJvcGVydGllcyA9IGRpY3QocHJpb3JpdHk9MjAwLCBkaXJlY3Rpb249ZGlyZWN0aW9uLAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICBhY2Nlc3M9IkFsbG93IiBpZiBvcGVuZWQgZWxzZSAiRGVueSIsIHByb3RvY29sPSIqIiwKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgc291cmNlQWRkcmVzc1ByZWZpeD0iKiIsIHNvdXJjZVBvcnRSYW5nZT0iKiIsCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIGRlc3RpbmF0aW9uQWRkcmVzc1ByZWZpeD0iKiIsIGRlc3RpbmF0aW9uUG9ydFJhbmdlPSIqIikKICAgICAgICAgICAgdXJsID0gc2VsZi5ydWxlX3VybChuc2csIGRpcmVjdGlvbikKICAgICAgICAgICAgc2VsZi5yZXF1ZXN0KCJQVVQiLCB1cmwsIEFSTSArICIvIiwgYm9keT17InByb3BlcnRpZXMiOiBwcm9wZXJ0aWVzfSkKICAgICAgICAgICAgdW50aWwgPSB0aW1lLm1vbm90b25pYygpICsgMTgwCiAgICAgICAgICAgIHdoaWxlIFRydWU6CiAgICAgICAgICAgICAgICBndWFyZCgpCiAgICAgICAgICAgICAgICBfLCByYXcgPSBzZWxmLnJlcXVlc3QoIkdFVCIsIHVybCwgQVJNICsgIi8iKQogICAgICAgICAgICAgICAgY3VycmVudCA9IGpzb24ubG9hZHMocmF3KVsicHJvcGVydGllcyJdCiAgICAgICAgICAgICAgICBzdGF0ZSA9IGN1cnJlbnQuZ2V0KCJwcm92aXNpb25pbmdTdGF0ZSIpCiAgICAgICAgICAgICAgICBpZiBzdGF0ZSA9PSAiU3VjY2VlZGVkIiBhbmQgY3VycmVudC5nZXQoImFjY2VzcyIpID09IHByb3BlcnRpZXNbImFjY2VzcyJdOgogICAgICAgICAgICAgICAgICAgIGJyZWFrCiAgICAgICAgICAgICAgICBpZiBzdGF0ZSA9PSAiRmFpbGVkIiBvciB0aW1lLm1vbm90b25pYygpID4gdW50aWw6CiAgICAgICAgICAgICAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJOU0cgZ2F0ZSB1cGRhdGUgZmFpbGVkIG9yIHRpbWVkIG91dCIpCiAgICAgICAgICAgICAgICB0aW1lLnNsZWVwKDIpCiAgICAgICAgICAgIGd1YXJkKCkKCiAgICBkZWYgZmVuY2Uoc2VsZiwgZ3VhcmQpOgogICAgICAgIHVudGlsID0gdGltZS5tb25vdG9uaWMoKSArIDI0MAogICAgICAgIHdoaWxlIFRydWU6CiAgICAgICAgICAgIGd1YXJkKCkKICAgICAgICAgICAgIyBBIGNvbmN1cnJlbnQgb3BlcmF0b3Igc3RvcCBtYXkgc3RpbGwgYmUgaW4gcHJvZ3Jlc3MuIFRoZXJlIGlzIG5vCiAgICAgICAgICAgICMgYXV0b21hdGljIHBlZXIgc3RhcnQgaW4gdGhpcyBjb250cm9sbGVyLgogICAgICAgICAgICBpZiBzZWxmLnBlZXJfc3RhdGUoKSBpbiAoIlBvd2VyU3RhdGUvc3RvcHBlZCIsICJQb3dlclN0YXRlL2RlYWxsb2NhdGVkIik6CiAgICAgICAgICAgICAgICByZXR1cm4KICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgaGVhZGVycywgXyA9IHNlbGYucG93ZXIoInBvd2VyT2ZmIikKICAgICAgICAgICAgICAgIGJyZWFrCiAgICAgICAgICAgIGV4Y2VwdCB1cmxsaWIuZXJyb3IuSFRUUEVycm9yIGFzIGVycm9yOgogICAgICAgICAgICAgICAgaWYgZXJyb3IuY29kZSAhPSA0MDkgb3IgdGltZS5tb25vdG9uaWMoKSA+IHVudGlsOgogICAgICAgICAgICAgICAgICAgIHJhaXNlCiAgICAgICAgICAgICAgICBlcnJvci5jbG9zZSgpCiAgICAgICAgICAgICAgICB0aW1lLnNsZWVwKDMpCiAgICAgICAgb3BlcmF0aW9uID0gaGVhZGVycy5nZXQoIkF6dXJlLUFzeW5jT3BlcmF0aW9uIikgb3IgaGVhZGVycy5nZXQoIkxvY2F0aW9uIikKICAgICAgICBpZiBvcGVyYXRpb24gYW5kIG5vdCBvcGVyYXRpb24uc3RhcnRzd2l0aChBUk0gKyAiLyIpOgogICAgICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoIlVuZXhwZWN0ZWQgQ29tcHV0ZSBvcGVyYXRpb24gZW5kcG9pbnQiKQogICAgICAgIHdoaWxlIFRydWU6CiAgICAgICAgICAgIGd1YXJkKCkKICAgICAgICAgICAgY29tcGxldGUgPSBUcnVlCiAgICAgICAgICAgIGlmIG9wZXJhdGlvbjoKICAgICAgICAgICAgICAgIF8sIGJvZHkgPSBzZWxmLnJlcXVlc3QoIkdFVCIsIG9wZXJhdGlvbiwgQVJNICsgIi8iKQogICAgICAgICAgICAgICAgc3RhdHVzID0ganNvbi5sb2Fkcyhib2R5KS5nZXQoInN0YXR1cyIpIGlmIGJvZHkgZWxzZSAiU3VjY2VlZGVkIgogICAgICAgICAgICAgICAgaWYgc3RhdHVzIGluICgiRmFpbGVkIiwgIkNhbmNlbGVkIik6CiAgICAgICAgICAgICAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJDb21wdXRlIGZlbmNpbmcgZmFpbGVkIikKICAgICAgICAgICAgICAgIGNvbXBsZXRlID0gc3RhdHVzID09ICJTdWNjZWVkZWQiCiAgICAgICAgICAgIGlmIGNvbXBsZXRlIGFuZCBzZWxmLnBlZXJfc3RhdGUoKSBpbiAoIlBvd2VyU3RhdGUvc3RvcHBlZCIsICJQb3dlclN0YXRlL2RlYWxsb2NhdGVkIik6CiAgICAgICAgICAgICAgICByZXR1cm4KICAgICAgICAgICAgaWYgdGltZS5tb25vdG9uaWMoKSA+IHVudGlsOgogICAgICAgICAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJDb21wdXRlIGZlbmNpbmcgdGltZWQgb3V0IikKICAgICAgICAgICAgdGltZS5zbGVlcCgzKQoKCmNsYXNzIENvbnRyb2xsZXI6CiAgICBkZWYgX19pbml0X18oc2VsZiwgYXp1cmUsIGNvbmZpZywgcXVpZXNjZSwgY2xvY2s9dGltZS5tb25vdG9uaWMpOgogICAgICAgIHNlbGYuYXp1cmUsIHNlbGYuY29uZmlnLCBzZWxmLnF1aWVzY2UsIHNlbGYuY2xvY2sgPSBhenVyZSwgY29uZmlnLCBxdWllc2NlLCBjbG9jawogICAgICAgIHNlbGYubGVhc2VfaWQgPSBOb25lCiAgICAgICAgc2VsZi5kZWFkbGluZSA9IDAKICAgICAgICBzZWxmLnBoYXNlID0gInN0YW5kYnkiCiAgICAgICAgc2VsZi5pbml0aWFsaXplZCA9IEZhbHNlCiAgICAgICAgc2VsZi5mYWlsZWQgPSBGYWxzZQoKICAgIGRlZiB2YWxpZChzZWxmKToKICAgICAgICByZXR1cm4gYm9vbChzZWxmLmxlYXNlX2lkKSBhbmQgc2VsZi5jbG9jaygpIDwgc2VsZi5kZWFkbGluZSBhbmQgbm90IHNlbGYuZmFpbGVkCgogICAgZGVmIGhlYWx0aHkoc2VsZik6CiAgICAgICAgcmV0dXJuIHNlbGYucGhhc2UgPT0gImFjdGl2ZSIgYW5kIHNlbGYudmFsaWQoKQoKICAgIGRlZiB0cmlwKHNlbGYpOgogICAgICAgIHNlbGYucGhhc2UgPSAiaXNvbGF0ZWQiCiAgICAgICAgc2VsZi5mYWlsZWQgPSBUcnVlCiAgICAgICAgIyBEbyBOT1QgcmVsZWFzZSB0aGUgbGVhc2U6IHN1Y2Nlc3NvciBtdXN0IHdhaXQgYW5kIGZlbmNlIHRoaXMgVk0uCiAgICAgICAgc2VsZi5xdWllc2NlKCkKCiAgICBkZWYgd2F0Y2hkb2coc2VsZik6CiAgICAgICAgaWYgc2VsZi5sZWFzZV9pZCBhbmQgbm90IHNlbGYudmFsaWQoKSBhbmQgbm90IHNlbGYuZmFpbGVkOgogICAgICAgICAgICBzZWxmLnRyaXAoKQoKICAgIGRlZiByZW5ldyhzZWxmKToKICAgICAgICBpZiBub3Qgc2VsZi52YWxpZCgpOgogICAgICAgICAgICByYWlzZSBSdW50aW1lRXJyb3IoIk5vIHZhbGlkIGxlYXNlOyBmZW5jaW5nIG11c3QgYmUgcmVwZWF0ZWQiKQogICAgICAgIHN0YXJ0ZWQgPSBzZWxmLmNsb2NrKCkKICAgICAgICBzZWxmLmF6dXJlLmxlYXNlKCJyZW5ldyIsIHNlbGYubGVhc2VfaWQpCiAgICAgICAgaWYgbm90IHNlbGYudmFsaWQoKToKICAgICAgICAgICAgcmFpc2UgUnVudGltZUVycm9yKCJMZWFzZSBleHBpcmVkIGR1cmluZyByZW5ld2FsIikKICAgICAgICBzZWxmLmRlYWRsaW5lID0gc3RhcnRlZCArIExFQVNFX1NFQ09ORFMgLSBTQUZFVFlfU0VDT05EUwogICAgICAgIGlmIG5vdCBzZWxmLnZhbGlkKCk6CiAgICAgICAgICAgIHJhaXNlIFJ1bnRpbWVFcnJvcigiTGF0ZSByZW5ld2FsIHJlc3BvbnNlIikKCiAgICBkZWYgdGljayhzZWxmKToKICAgICAgICBpZiBzZWxmLmZhaWxlZDoKICAgICAgICAgICAgcmV0dXJuCiAgICAgICAgaWYgbm90IHNlbGYuaW5pdGlhbGl6ZWQ6CiAgICAgICAgICAgIHNlbGYuYXp1cmUuZ2F0ZShzZWxmLmNvbmZpZ1sib3duX25zZ19pZCJdLCBGYWxzZSkKICAgICAgICAgICAgc2VsZi5henVyZS5lbnN1cmVfYmxvYigpCiAgICAgICAgICAgIHNlbGYuaW5pdGlhbGl6ZWQgPSBUcnVlCiAgICAgICAgaWYgc2VsZi5sZWFzZV9pZDoKICAgICAgICAgICAgc2VsZi5yZW5ldygpCiAgICAgICAgICAgIHJldHVybgogICAgICAgIGxlYXNlID0gc3RyKHV1aWQudXVpZDQoKSkKICAgICAgICBzdGFydGVkID0gc2VsZi5jbG9jaygpCiAgICAgICAgdHJ5OgogICAgICAgICAgICBzZWxmLmF6dXJlLmxlYXNlKCJhY3F1aXJlIiwgbGVhc2UpCiAgICAgICAgZXhjZXB0IHVybGxpYi5lcnJvci5IVFRQRXJyb3IgYXMgZXJyb3I6CiAgICAgICAgICAgIGlmIGVycm9yLmNvZGUgPT0gNDA5OgogICAgICAgICAgICAgICAgZXJyb3IuY2xvc2UoKQogICAgICAgICAgICAgICAgcmV0dXJuCiAgICAgICAgICAgIHJhaXNlCiAgICAgICAgc2VsZi5kZWFkbGluZSA9IHN0YXJ0ZWQgKyBMRUFTRV9TRUNPTkRTIC0gU0FGRVRZX1NFQ09ORFMKICAgICAgICBzZWxmLmxlYXNlX2lkID0gbGVhc2UKICAgICAgICBzZWxmLnBoYXNlID0gImNhbmRpZGF0ZSIKICAgICAgICBzZWxmLnJlbmV3KCkKICAgICAgICBwcmV2aW91cyA9IHNlbGYuYXp1cmUub3duZXIoKQogICAgICAgICMgT25seSBhIGdlbnVpbmVseSBuZXcgd2l0bmVzcyBjYW4gYm9vdHN0cmFwIHdpdGhvdXQgZmVuY2luZy4gQm90aAogICAgICAgICMgaW5pdGlhbCBOU0dzIGFyZSBjbG9zZWQuIE5ldmVyIGRlbGV0ZS9yZWNyZWF0ZSB0aGUgd2l0bmVzcyB0byBmYWlsIG92ZXIuCiAgICAgICAgZnJlc2ggPSBub3QgcHJldmlvdXMgYW5kIHNlbGYuYXp1cmUuZ2F0ZV9jbG9zZWQoc2VsZi5jb25maWdbInBlZXJfbnNnX2lkIl0pCiAgICAgICAgc2VsZi5henVyZS5zZXRfb3duZXIoc2VsZi5jb25maWdbIm5vZGUiXSwgbGVhc2UpCiAgICAgICAgaWYgbm90IGZyZXNoOgogICAgICAgICAgICBzZWxmLnBoYXNlID0gImZlbmNpbmciCiAgICAgICAgICAgIHNlbGYuYXp1cmUuZmVuY2Uoc2VsZi5yZW5ldykKICAgICAgICAgICAgc2VsZi5henVyZS5nYXRlKHNlbGYuY29uZmlnWyJwZWVyX25zZ19pZCJdLCBGYWxzZSwgc2VsZi5yZW5ldykKICAgICAgICBzZWxmLnJlbmV3KCkKICAgICAgICBzZWxmLmF6dXJlLmdhdGUoc2VsZi5jb25maWdbIm93bl9uc2dfaWQiXSwgVHJ1ZSwgc2VsZi5yZW5ldykKICAgICAgICBzZWxmLnJlbmV3KCkKICAgICAgICBzZWxmLnBoYXNlID0gImFjdGl2ZSIKICAgICAgICBMT0cud2FybmluZygiQUNUSVZFOiBsZWFzZSBvd25lZDsgcHJpb3Igb3duZXIgZmVuY2VkIG9yIGZpcnN0IGJvb3RzdHJhcCB2ZXJpZmllZCIpCgogICAgZGVmIHJ1bl9vbmNlKHNlbGYpOgogICAgICAgIHRyeToKICAgICAgICAgICAgc2VsZi50aWNrKCkKICAgICAgICBleGNlcHQgRXhjZXB0aW9uOgogICAgICAgICAgICBMT0cuZXhjZXB0aW9uKCJIQSBpdGVyYXRpb24gZmFpbGVkIikKICAgICAgICAgICAgIyBSZW5ld2FsIG1heSByZWNvdmVyIHdpdGhpbiB0aGUgc2FmZXR5IHdpbmRvdy4gQSBwYXJ0aWFsIHByb21vdGlvbgogICAgICAgICAgICAjIGNhbm5vdCBzYWZlbHkgcmV0cnkgYmVjYXVzZSBhIGNvbnRyb2wtcGxhbmUgd3JpdGUgbWF5IHN0aWxsIGZpbmlzaC4KICAgICAgICAgICAgaWYgc2VsZi5sZWFzZV9pZCBhbmQgc2VsZi5waGFzZSAhPSAiYWN0aXZlIjoKICAgICAgICAgICAgICAgIHNlbGYudHJpcCgpCiAgICAgICAgICAgIHNlbGYud2F0Y2hkb2coKQoKCmRlZiBxdWllc2NlKCk6CiAgICAjIEZhaWwgY2xvc2VkIGxvY2FsbHkgZXZlbiB3aGVuIHRoZSBBenVyZSBjb250cm9sIHBsYW5lIGlzIHVucmVhY2hhYmxlLgogICAgIyBNYW5hZ2VtZW50IGlzIGxvc3Qgb24gdGhpcyBmYWlsZWQgbm9kZSB0b287IEF6dXJlIGZlbmNpbmcgcmVtYWlucyBwb3NzaWJsZS4KICAgIGZvciBuaWMgaW4gKCJobjEiLCAiaG4wIik6CiAgICAgICAgdHJ5OgogICAgICAgICAgICBzdWJwcm9jZXNzLnJ1bihbIi9zYmluL2lmY29uZmlnIiwgbmljLCAiZG93biJdLCBjaGVjaz1UcnVlLCB0aW1lb3V0PTMpCiAgICAgICAgZXhjZXB0IEV4Y2VwdGlvbjoKICAgICAgICAgICAgTE9HLmV4Y2VwdGlvbigiQ291bGQgbm90IGRpc2FibGUgJXM7IHN1Y2Nlc3NvciBNVVNUIGZlbmNlIiwgbmljKQoKCmRlZiBzZXJ2ZShjb250cm9sbGVyLCBwb3J0KToKICAgIGNsYXNzIEhhbmRsZXIoaHR0cC5zZXJ2ZXIuQmFzZUhUVFBSZXF1ZXN0SGFuZGxlcik6CiAgICAgICAgZGVmIGRvX0dFVChzZWxmKToKICAgICAgICAgICAgaWYgc2VsZi5jbGllbnRfYWRkcmVzc1swXSBub3QgaW4gKCIxNjguNjMuMTI5LjE2IiwgIjEyNy4wLjAuMSIpOgogICAgICAgICAgICAgICAgc2VsZi5zZW5kX2Vycm9yKDQwMykKICAgICAgICAgICAgICAgIHJldHVybgogICAgICAgICAgICBzZWxmLnNlbmRfcmVzcG9uc2UoMjAwIGlmIHNlbGYucGF0aCA9PSAiL2hlYWx0aCIgYW5kIGNvbnRyb2xsZXIuaGVhbHRoeSgpIGVsc2UgNTAzKQogICAgICAgICAgICBzZWxmLmVuZF9oZWFkZXJzKCkKICAgICAgICBkZWYgbG9nX21lc3NhZ2Uoc2VsZiwgKmFyZ3MpOgogICAgICAgICAgICBwYXNzCiAgICBzZXJ2ZXIgPSBodHRwLnNlcnZlci5UaHJlYWRpbmdIVFRQU2VydmVyKCgiMC4wLjAuMCIsIHBvcnQpLCBIYW5kbGVyKQogICAgc2VydmVyLmRhZW1vbl90aHJlYWRzID0gVHJ1ZQogICAgdGhyZWFkaW5nLlRocmVhZCh0YXJnZXQ9c2VydmVyLnNlcnZlX2ZvcmV2ZXIsIGRhZW1vbj1UcnVlKS5zdGFydCgpCiAgICByZXR1cm4gc2VydmVyCgoKZGVmIG1haW4oKToKICAgIHBhcnNlciA9IGFyZ3BhcnNlLkFyZ3VtZW50UGFyc2VyKCkKICAgIHBhcnNlci5hZGRfYXJndW1lbnQoIi0tY29uZmlnIiwgZGVmYXVsdD1zdHIoUk9PVCAvICJhenVyZS5qc29uIikpCiAgICBhcmdzID0gcGFyc2VyLnBhcnNlX2FyZ3MoKQogICAgbG9nZ2luZy5iYXNpY0NvbmZpZyhsZXZlbD1sb2dnaW5nLklORk8sIGZvcm1hdD0iJShhc2N0aW1lKXMgJShsZXZlbG5hbWUpcyAlKG1lc3NhZ2UpcyIpCiAgICBsb2NrID0gb3BlbihST09UIC8gImFnZW50LmxvY2siLCAiYSIpCiAgICBmY250bC5mbG9jayhsb2NrLCBmY250bC5MT0NLX0VYIHwgZmNudGwuTE9DS19OQikKICAgIGNvbmZpZyA9IGpzb24ubG9hZHMoUGF0aChhcmdzLmNvbmZpZykucmVhZF90ZXh0KCkpCiAgICBjdGwgPSBDb250cm9sbGVyKEF6dXJlKGNvbmZpZyksIGNvbmZpZywgcXVpZXNjZSkKICAgIHN0b3AgPSB0aHJlYWRpbmcuRXZlbnQoKQogICAgZm9yIHNpZyBpbiAoc2lnbmFsLlNJR1RFUk0sIHNpZ25hbC5TSUdJTlQpOgogICAgICAgIHNpZ25hbC5zaWduYWwoc2lnLCBsYW1iZGEgKl86IHN0b3Auc2V0KCkpCiAgICBzZXJ2ZXIgPSBzZXJ2ZShjdGwsIGNvbmZpZ1sicHJvYmVfcG9ydCJdKQogICAgZGVmIHdhdGNoKCk6CiAgICAgICAgd2hpbGUgbm90IHN0b3Aud2FpdCgxKToKICAgICAgICAgICAgY3RsLndhdGNoZG9nKCkKICAgIHRocmVhZGluZy5UaHJlYWQodGFyZ2V0PXdhdGNoLCBkYWVtb249VHJ1ZSkuc3RhcnQoKQogICAgc3RvcC53YWl0KDUgaWYgY29uZmlnWyJub2RlIl0gPT0gIlByaW1hcnkiIGVsc2UgMjApCiAgICB0cnk6CiAgICAgICAgd2hpbGUgbm90IHN0b3AuaXNfc2V0KCkgYW5kIG5vdCBjdGwuZmFpbGVkOgogICAgICAgICAgICAjIEZpcnN0IGJvb3QgdmVyaWZpY2F0aW9uIG11c3QgY29tcGxldGUgYmVmb3JlIGFkdmVydGlzaW5nIEhBIGhlYWx0aC4KICAgICAgICAgICAgaWYgUGF0aCgiL3Zhci9kYi9vcG5henVyZS9maXJzdC1ib290LWNvbXBsZXRlIikuZXhpc3RzKCk6CiAgICAgICAgICAgICAgICBjdGwucnVuX29uY2UoKQogICAgICAgICAgICBzdG9wLndhaXQoNSkKICAgIGZpbmFsbHk6CiAgICAgICAgaWYgY3RsLmxlYXNlX2lkOgogICAgICAgICAgICBjdGwudHJpcCgpCiAgICAgICAgc2VydmVyLnNodXRkb3duKCkKCmlmIF9fbmFtZV9fID09ICJfX21haW5fXyI6CiAgICBtYWluKCkK",
+                    "$fxv#7": "IyEvdXNyL2xvY2FsL2Jpbi9weXRob24zCiIiIkluc3RhbGwgdGhlIG9wdGlvbmFsIEhBIGNvbnRyb2xsZXIgYWZ0ZXIgT1BOc2Vuc2UgY29udmVyc2lvbiwgYmVmb3JlIHJlYm9vdC4iIiIKaW1wb3J0IGpzb24KaW1wb3J0IG9zCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAppbXBvcnQgc2h1dGlsCmltcG9ydCBzeXMKCgpkZWYgaW5zdGFsbChzZXR0aW5ncywgYWdlbnQsIHByZWZpeD1QYXRoKCcvJykpOgogICAgY29uZmlnID0gc2V0dGluZ3NbJ2hhJ10KICAgIGlmIGNvbmZpZ1snbm9kZSddIG5vdCBpbiAoJ1ByaW1hcnknLCAnU2Vjb25kYXJ5Jykgb3IgY29uZmlnWydwcm9iZV9wb3J0J10gIT0gODA4MDoKICAgICAgICByYWlzZSBWYWx1ZUVycm9yKCdJbnZhbGlkIEhBIHJvbGUgb3IgcHJvYmUgcG9ydCcpCiAgICByb290ID0gcHJlZml4IC8gJ2NvbmYvb3BuYXp1cmUtaGEnCiAgICByb290Lm1rZGlyKHBhcmVudHM9VHJ1ZSwgZXhpc3Rfb2s9VHJ1ZSwgbW9kZT0wbzcwMCkKICAgIG9zLmNobW9kKHJvb3QsIDBvNzAwKQogICAgdGFyZ2V0ID0gcm9vdCAvICdhenVyZS5qc29uJwogICAgdGFyZ2V0LndyaXRlX3RleHQoanNvbi5kdW1wcyhjb25maWcsIGluZGVudD0yKSArICdcbicpCiAgICB0YXJnZXQuY2htb2QoMG82MDApCiAgICBwcm9ncmFtID0gcHJlZml4IC8gJ3Vzci9sb2NhbC9zYmluL29wbmF6dXJlLWhhJwogICAgcHJvZ3JhbS5wYXJlbnQubWtkaXIocGFyZW50cz1UcnVlLCBleGlzdF9vaz1UcnVlKQogICAgc2h1dGlsLmNvcHlmaWxlKGFnZW50LCBwcm9ncmFtKQogICAgcHJvZ3JhbS5jaG1vZCgwbzcwMCkKICAgIGhvb2tzID0gcHJlZml4IC8gJ3Vzci9sb2NhbC9ldGMvcmMuc3lzaG9vay5kJwogICAgZm9yIGtpbmQgaW4gKCdlYXJseScsICdzdGFydCcpOgogICAgICAgIChob29rcyAvIGtpbmQpLm1rZGlyKHBhcmVudHM9VHJ1ZSwgZXhpc3Rfb2s9VHJ1ZSkKICAgIGVhcmx5ID0gaG9va3MgLyAnZWFybHkvMDEtb3BuYXp1cmUtaGEnCiAgICBlYXJseS53cml0ZV90ZXh0KCcnJyMhL2Jpbi9zaAojIE5ldmVyIHJldXNlIHJlYWRpbmVzcyBmcm9tIGEgcHJldmlvdXMgYm9vdC4Kcm0gLWYgL3Zhci9kYi9vcG5henVyZS9maXJzdC1ib290LWNvbXBsZXRlCicnJykKICAgIHN0YXJ0ID0gaG9va3MgLyAnc3RhcnQvOTYtb3BuYXp1cmUtaGEnCiAgICBzdGFydC53cml0ZV90ZXh0KCcnJyMhL2Jpbi9zaAojIE5vIGF1dG9tYXRpYyByZXNwYXduOiBhIGZhaWxlZCBub2RlIHJlcXVpcmVzIG9wZXJhdG9yIHJlY292ZXJ5LgovdXNyL3NiaW4vZGFlbW9uIC1mIC1wIC92YXIvcnVuL29wbmF6dXJlLWhhLnBpZCAtbyAvdmFyL2xvZy9vcG5henVyZS1oYS5sb2cgL3Vzci9sb2NhbC9iaW4vcHl0aG9uMyAvdXNyL2xvY2FsL3NiaW4vb3BuYXp1cmUtaGEKJycnKQogICAgZWFybHkuY2htb2QoMG83NTUpCiAgICBzdGFydC5jaG1vZCgwbzc1NSkKCgppZiBfX25hbWVfXyA9PSAnX19tYWluX18nOgogICAgaW5zdGFsbChqc29uLmxvYWRzKFBhdGgoc3lzLmFyZ3ZbMV0pLnJlYWRfdGV4dCgpKSwgUGF0aChzeXMuYXJndlsyXSkpCg==",
+                    "imagePublisher": "freebsd",
+                    "imageOffer": "freebsd-15_1",
+                    "imageSku": "15_1-release-amd64-gen2-zfs",
+                    "embeddedSources": {
+                      "configureopnsense.sh": "[variables('$fxv#0')]",
+                      "config.xml": "[variables('$fxv#1')]",
+                      "get_nic_gw.py": "[variables('$fxv#2')]",
+                      "prepare_config.py": "[variables('$fxv#3')]",
+                      "actions_waagent.conf": "[variables('$fxv#4')]",
+                      "verify_opnsense.sh": "[variables('$fxv#5')]",
+                      "ha/agent.py": "[variables('$fxv#6')]",
+                      "ha/install.py": "[variables('$fxv#7')]"
+                    },
+                    "bootstrapLauncher": "#!/bin/sh\nset -eu\numask 077\n[ \"$#\" = 2 ] || exit 1\nOPNAZURE_SOURCE=$(mktemp -d /var/tmp/opnazure-source.XXXXXX)\nexport OPNAZURE_SOURCE\ncleanup() { rm -rf \"$OPNAZURE_SOURCE\"; }\ntrap cleanup EXIT\ntrap \"exit 1\" HUP INT TERM\nmkdir -p \"$OPNAZURE_SOURCE/ha\"\nPYTHON=\nfor candidate in /usr/local/bin/python3 /usr/local/bin/python3.[0-9]*; do\n    if [ -x \"$candidate\" ] && \"$candidate\" -c \"import base64,json,pathlib\"; then\n        PYTHON=$candidate\n        break\n    fi\ndone\n[ -n \"$PYTHON\" ] || exit 1\n\"$PYTHON\" -c \"import base64,json,pathlib,sys; p=pathlib.Path(sys.argv[1]); data=json.loads(base64.b64decode(sys.argv[2],validate=True)); assert all(not pathlib.Path(k).is_absolute() and all(x != chr(46)*2 for x in pathlib.Path(k).parts) for k in data); [p.joinpath(k).write_bytes(base64.b64decode(v,validate=True)) for k,v in data.items()]\" \"$OPNAZURE_SOURCE\" \"$2\"\n/bin/sh \"$OPNAZURE_SOURCE/configureopnsense.sh\" \"$1\"\n"
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Compute/virtualMachines",
+                      "apiVersion": "2023-07-01",
+                      "name": "[parameters('virtualMachineName')]",
+                      "location": "[parameters('Location')]",
+                      "identity": "[if(empty(parameters('managedIdentityId')), null(), createObject('type', 'UserAssigned', 'userAssignedIdentities', createObject(format('{0}', parameters('managedIdentityId')), createObject())))]",
+                      "properties": {
+                        "osProfile": {
+                          "computerName": "[parameters('virtualMachineName')]",
+                          "adminUsername": "[parameters('TempUsername')]",
+                          "adminPassword": "[parameters('TempPassword')]"
+                        },
+                        "availabilitySet": "[if(empty(parameters('availabilitySetId')), null(), createObject('id', parameters('availabilitySetId')))]",
+                        "hardwareProfile": {
+                          "vmSize": "[parameters('virtualMachineSize')]"
+                        },
+                        "storageProfile": {
+                          "osDisk": {
+                            "createOption": "FromImage"
+                          },
+                          "imageReference": {
+                            "publisher": "[variables('imagePublisher')]",
+                            "offer": "[variables('imageOffer')]",
+                            "sku": "[variables('imageSku')]",
+                            "version": "[parameters('FreeBSDImageVersion')]"
+                          }
+                        },
+                        "diagnosticsProfile": {
+                          "bootDiagnostics": {
+                            "enabled": true
+                          }
+                        },
+                        "networkProfile": {
+                          "networkInterfaces": [
+                            {
+                              "id": "[if(empty(parameters('providedNics')), reference(resourceId('Microsoft.Resources/deployments', format('{0}-Untrusted-NIC', parameters('virtualMachineName'))), '2025-04-01').outputs.nicId.value, parameters('providedNics').wanId)]",
+                              "properties": {
+                                "primary": true
+                              }
+                            },
+                            {
+                              "id": "[if(empty(parameters('providedNics')), reference(resourceId('Microsoft.Resources/deployments', format('{0}-Trusted-NIC', parameters('virtualMachineName'))), '2025-04-01').outputs.nicId.value, parameters('providedNics').lanId)]",
+                              "properties": {
+                                "primary": false
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      "plan": {
+                        "name": "[variables('imageSku')]",
+                        "publisher": "[variables('imagePublisher')]",
+                        "product": "[variables('imageOffer')]"
+                      },
+                      "dependsOn": [
+                        "[resourceId('Microsoft.Resources/deployments', format('{0}-Trusted-NIC', parameters('virtualMachineName')))]",
+                        "[resourceId('Microsoft.Resources/deployments', format('{0}-Untrusted-NIC', parameters('virtualMachineName')))]"
+                      ]
+                    },
+                    {
+                      "type": "Microsoft.Compute/virtualMachines/extensions",
+                      "apiVersion": "2023-07-01",
+                      "name": "[format('{0}/{1}', parameters('virtualMachineName'), 'CustomScript')]",
+                      "location": "[parameters('Location')]",
+                      "properties": {
+                        "publisher": "Microsoft.OSTCExtensions",
+                        "type": "CustomScriptForLinux",
+                        "typeHandlerVersion": "1.5",
+                        "autoUpgradeMinorVersion": false,
+                        "settings": {
+                          "fileUris": [],
+                          "commandToExecute": "[format('/bin/sh -c ''{0}'' opnazure {1} {2}', variables('bootstrapLauncher'), base64(string(createObject('scriptURI', parameters('ShellScriptObj').OpnScriptURI, 'opnVersion', parameters('ShellScriptObj').OpnVersion, 'agentMinimumVersion', parameters('ShellScriptObj').WALinuxVersion, 'role', parameters('ShellScriptObj').OpnType, 'publicIPAddress', parameters('ShellScriptObj').publicIPAddress, 'localTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'localTrustedIP'), ''), 'peerTrustedIP', coalesce(tryGet(parameters('ShellScriptObj'), 'peerTrustedIP'), ''), 'trustedSubnet', if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').TrustedSubnetName, '/')[0], split(parameters('ShellScriptObj').TrustedSubnetName, '/')[1]), '2023-05-01').addressPrefix), 'windowsSubnet', if(not(empty(parameters('ShellScriptObj').WindowsSubnetName)), if(contains(reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01'), 'addressPrefixes'), reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefixes[0], reference(resourceId('Microsoft.Network/virtualNetworks/subnets', split(parameters('ShellScriptObj').WindowsSubnetName, '/')[0], split(parameters('ShellScriptObj').WindowsSubnetName, '/')[1]), '2023-05-01').addressPrefix), ''), 'ha', parameters('haConfig')))), base64(string(variables('embeddedSources'))))]"
+                        }
+                      },
+                      "dependsOn": [
+                        "[resourceId('Microsoft.Compute/virtualMachines', parameters('virtualMachineName'))]"
+                      ]
+                    },
+                    {
+                      "condition": "[empty(parameters('providedNics'))]",
+                      "type": "Microsoft.Resources/deployments",
+                      "apiVersion": "2025-04-01",
+                      "name": "[format('{0}-Untrusted-NIC', parameters('virtualMachineName'))]",
+                      "properties": {
+                        "expressionEvaluationOptions": {
+                          "scope": "inner"
+                        },
+                        "mode": "Incremental",
+                        "parameters": {
+                          "Location": {
+                            "value": "[parameters('Location')]"
+                          },
+                          "nicName": {
+                            "value": "[format('{0}-Untrusted-NIC', parameters('virtualMachineName'))]"
+                          },
+                          "subnetId": {
+                            "value": "[parameters('untrustedSubnetId')]"
+                          },
+                          "publicIPId": {
+                            "value": "[parameters('publicIPId')]"
+                          },
+                          "enableIPForwarding": {
+                            "value": true
+                          },
+                          "nsgId": {
+                            "value": "[parameters('nsgId')]"
+                          }
+                        },
+                        "template": {
+                          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                          "contentVersion": "1.0.0.0",
+                          "metadata": {
+                            "_generator": {
+                              "name": "bicep",
+                              "version": "0.47.16.16243",
+                              "templateHash": "1609907422693015414"
+                            }
+                          },
+                          "parameters": {
+                            "subnetId": {
+                              "type": "string"
+                            },
+                            "publicIPId": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "enableIPForwarding": {
+                              "type": "bool",
+                              "defaultValue": false
+                            },
+                            "nicName": {
+                              "type": "string"
+                            },
+                            "nsgId": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "loadBalancerBackendAddressPoolId": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "loadBalancerInboundNatRules": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "Location": {
+                              "type": "string",
+                              "defaultValue": "[resourceGroup().location]"
+                            }
+                          },
+                          "resources": [
+                            {
+                              "type": "Microsoft.Network/networkInterfaces",
+                              "apiVersion": "2023-05-01",
+                              "name": "[parameters('nicName')]",
+                              "location": "[parameters('Location')]",
+                              "properties": {
+                                "enableIPForwarding": "[parameters('enableIPForwarding')]",
+                                "networkSecurityGroup": {
+                                  "id": "[parameters('nsgId')]"
+                                },
+                                "ipConfigurations": [
+                                  {
+                                    "name": "ipconfig1",
+                                    "properties": {
+                                      "subnet": {
+                                        "id": "[parameters('subnetId')]"
+                                      },
+                                      "privateIPAllocationMethod": "Dynamic",
+                                      "publicIPAddress": "[if(not(empty(parameters('publicIPId'))), createObject('id', parameters('publicIPId')), null())]",
+                                      "loadBalancerBackendAddressPools": "[if(not(empty(parameters('loadBalancerBackendAddressPoolId'))), createArray(createObject('id', parameters('loadBalancerBackendAddressPoolId'))), null())]",
+                                      "loadBalancerInboundNatRules": "[if(not(empty(parameters('loadBalancerInboundNatRules'))), createArray(createObject('id', parameters('loadBalancerInboundNatRules'))), null())]"
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ],
+                          "outputs": {
+                            "nicName": {
+                              "type": "string",
+                              "value": "[parameters('nicName')]"
+                            },
+                            "nicId": {
+                              "type": "string",
+                              "value": "[resourceId('Microsoft.Network/networkInterfaces', parameters('nicName'))]"
+                            },
+                            "nicIP": {
+                              "type": "string",
+                              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].properties.privateIPAddress]"
+                            },
+                            "nicIpConfigurationId": {
+                              "type": "string",
+                              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].id]"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "condition": "[empty(parameters('providedNics'))]",
+                      "type": "Microsoft.Resources/deployments",
+                      "apiVersion": "2025-04-01",
+                      "name": "[format('{0}-Trusted-NIC', parameters('virtualMachineName'))]",
+                      "properties": {
+                        "expressionEvaluationOptions": {
+                          "scope": "inner"
+                        },
+                        "mode": "Incremental",
+                        "parameters": {
+                          "Location": {
+                            "value": "[parameters('Location')]"
+                          },
+                          "nicName": {
+                            "value": "[format('{0}-Trusted-NIC', parameters('virtualMachineName'))]"
+                          },
+                          "subnetId": {
+                            "value": "[parameters('trustedSubnetId')]"
+                          },
+                          "enableIPForwarding": {
+                            "value": true
+                          },
+                          "nsgId": {
+                            "value": "[parameters('nsgId')]"
+                          }
+                        },
+                        "template": {
+                          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                          "contentVersion": "1.0.0.0",
+                          "metadata": {
+                            "_generator": {
+                              "name": "bicep",
+                              "version": "0.47.16.16243",
+                              "templateHash": "1609907422693015414"
+                            }
+                          },
+                          "parameters": {
+                            "subnetId": {
+                              "type": "string"
+                            },
+                            "publicIPId": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "enableIPForwarding": {
+                              "type": "bool",
+                              "defaultValue": false
+                            },
+                            "nicName": {
+                              "type": "string"
+                            },
+                            "nsgId": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "loadBalancerBackendAddressPoolId": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "loadBalancerInboundNatRules": {
+                              "type": "string",
+                              "defaultValue": ""
+                            },
+                            "Location": {
+                              "type": "string",
+                              "defaultValue": "[resourceGroup().location]"
+                            }
+                          },
+                          "resources": [
+                            {
+                              "type": "Microsoft.Network/networkInterfaces",
+                              "apiVersion": "2023-05-01",
+                              "name": "[parameters('nicName')]",
+                              "location": "[parameters('Location')]",
+                              "properties": {
+                                "enableIPForwarding": "[parameters('enableIPForwarding')]",
+                                "networkSecurityGroup": {
+                                  "id": "[parameters('nsgId')]"
+                                },
+                                "ipConfigurations": [
+                                  {
+                                    "name": "ipconfig1",
+                                    "properties": {
+                                      "subnet": {
+                                        "id": "[parameters('subnetId')]"
+                                      },
+                                      "privateIPAllocationMethod": "Dynamic",
+                                      "publicIPAddress": "[if(not(empty(parameters('publicIPId'))), createObject('id', parameters('publicIPId')), null())]",
+                                      "loadBalancerBackendAddressPools": "[if(not(empty(parameters('loadBalancerBackendAddressPoolId'))), createArray(createObject('id', parameters('loadBalancerBackendAddressPoolId'))), null())]",
+                                      "loadBalancerInboundNatRules": "[if(not(empty(parameters('loadBalancerInboundNatRules'))), createArray(createObject('id', parameters('loadBalancerInboundNatRules'))), null())]"
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          ],
+                          "outputs": {
+                            "nicName": {
+                              "type": "string",
+                              "value": "[parameters('nicName')]"
+                            },
+                            "nicId": {
+                              "type": "string",
+                              "value": "[resourceId('Microsoft.Network/networkInterfaces', parameters('nicName'))]"
+                            },
+                            "nicIP": {
+                              "type": "string",
+                              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].properties.privateIPAddress]"
+                            },
+                            "nicIpConfigurationId": {
+                              "type": "string",
+                              "value": "[reference(resourceId('Microsoft.Network/networkInterfaces', parameters('nicName')), '2023-05-01').ipConfigurations[0].id]"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "outputs": {
+                    "untrustedNicIP": {
+                      "type": "string",
+                      "value": "[if(empty(parameters('providedNics')), reference(resourceId('Microsoft.Resources/deployments', format('{0}-Untrusted-NIC', parameters('virtualMachineName'))), '2025-04-01').outputs.nicIP.value, parameters('providedNics').wanIP)]"
+                    },
+                    "trustedNicIP": {
+                      "type": "string",
+                      "value": "[if(empty(parameters('providedNics')), reference(resourceId('Microsoft.Resources/deployments', format('{0}-Trusted-NIC', parameters('virtualMachineName'))), '2025-04-01').outputs.nicIP.value, parameters('providedNics').lanIP)]"
+                    }
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Compute/availabilitySets', format('{0}-AvailabilitySet', parameters('virtualMachineName')))]",
+                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
+                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
+                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[sub(1, copyIndex())]))]",
+                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
+                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Untrusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]",
+                "[resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Untrusted-NIC', parameters('virtualMachineName'), variables('roles')[copyIndex()]))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "primaryTrustedIP": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[0])), '2025-04-01').outputs.nicIP.value]"
+            },
+            "secondaryTrustedIP": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-{1}-Trusted-NIC', parameters('virtualMachineName'), variables('roles')[1])), '2025-04-01').outputs.nicIP.value]"
+            },
+            "internalLoadBalancerIP": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('internalLoadBalanceName')), '2025-04-01').outputs.frontendIP.value.privateIPAddress]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-gates', parameters('clusterName')))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-public-ip', parameters('clusterName')))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-network', parameters('clusterName')))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-fence-primary', parameters('clusterName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "peerVmName": {
+            "value": "[format('{0}-Secondary', parameters('clusterName'))]"
+          },
+          "principalId": {
+            "value": "[createArray(reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.primaryIdentity.value, reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.secondaryIdentity.value)[0].principalId]"
+          },
+          "roleDefinitionId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.fenceRoleId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "12249051507274384660"
+            }
+          },
+          "parameters": {
+            "peerVmName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            },
+            "roleDefinitionId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName'))]",
+              "name": "[guid(resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName')), parameters('principalId'), parameters('roleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[parameters('roleDefinitionId')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-pair', parameters('clusterName')))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('{0}-fence-secondary', parameters('clusterName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "peerVmName": {
+            "value": "[format('{0}-Primary', parameters('clusterName'))]"
+          },
+          "principalId": {
+            "value": "[createArray(reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.primaryIdentity.value, reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.secondaryIdentity.value)[1].principalId]"
+          },
+          "roleDefinitionId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.fenceRoleId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "12249051507274384660"
+            }
+          },
+          "parameters": {
+            "peerVmName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            },
+            "roleDefinitionId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName'))]",
+              "name": "[guid(resourceId('Microsoft.Compute/virtualMachines', parameters('peerVmName')), parameters('principalId'), parameters('roleDefinitionId'))]",
+              "properties": {
+                "roleDefinitionId": "[parameters('roleDefinitionId')]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-pair', parameters('clusterName')))]",
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('opn-ha-status-{0}', uniqueString(resourceGroup().id, parameters('clusterName')))]",
+      "subscriptionId": "[subscription().subscriptionId]",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "principalIds": {
+            "value": [
+              "[createArray(reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.primaryIdentity.value, reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.secondaryIdentity.value)[0].principalId]",
+              "[createArray(reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.primaryIdentity.value, reference(resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName'))), '2025-04-01').outputs.secondaryIdentity.value)[1].principalId]"
+            ]
+          },
+          "clusterId": {
+            "value": "[format('{0}/{1}', resourceGroup().id, parameters('clusterName'))]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.47.16.16243",
+              "templateHash": "16592107169973589042"
+            }
+          },
+          "parameters": {
+            "principalIds": {
+              "type": "array"
+            },
+            "clusterId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleDefinitions",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(subscription().id, parameters('clusterId'), 'ha-operation-status')]",
+              "properties": {
+                "roleName": "[format('OPNazure operation status {0}', uniqueString(parameters('clusterId')))]",
+                "type": "CustomRole",
+                "assignableScopes": [
+                  "[subscription().id]"
+                ],
+                "permissions": [
+                  {
+                    "actions": [
+                      "Microsoft.Compute/locations/operations/read"
+                    ],
+                    "notActions": [],
+                    "dataActions": [],
+                    "notDataActions": []
+                  }
+                ]
+              }
+            },
+            {
+              "copy": {
+                "name": "access",
+                "count": "[length(parameters('principalIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(subscription().id, parameters('principalIds')[copyIndex()], subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(subscription().id, parameters('clusterId'), 'ha-operation-status')))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(subscription().id, parameters('clusterId'), 'ha-operation-status'))]",
+                "principalId": "[parameters('principalIds')[copyIndex()]]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', guid(subscription().id, parameters('clusterId'), 'ha-operation-status'))]"
+              ]
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('{0}-witness', parameters('clusterName')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "publicIPAddress": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-public-ip', parameters('clusterName'))), '2025-04-01').outputs.publicipAddress.value]"
+    },
+    "primaryManagementURL": {
+      "type": "string",
+      "value": "[format('https://{0}:50443', reference(resourceId('Microsoft.Resources/deployments', format('{0}-public-ip', parameters('clusterName'))), '2025-04-01').outputs.publicipAddress.value)]"
+    },
+    "secondaryManagementURL": {
+      "type": "string",
+      "value": "[format('https://{0}:50444', reference(resourceId('Microsoft.Resources/deployments', format('{0}-public-ip', parameters('clusterName'))), '2025-04-01').outputs.publicipAddress.value)]"
+    },
+    "internalNextHop": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-pair', parameters('clusterName'))), '2025-04-01').outputs.internalLoadBalancerIP.value]"
+    },
+    "primaryTrustedIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-pair', parameters('clusterName'))), '2025-04-01').outputs.primaryTrustedIP.value]"
+    },
+    "secondaryTrustedIP": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('{0}-pair', parameters('clusterName'))), '2025-04-01').outputs.secondaryTrustedIP.value]"
+    },
+    "setup": {
+      "type": "string",
+      "value": "Change root passwords; configure VPNs/routing on both nodes; see docs/active-backup.md. No workload routes or VPN instances are installed."
+    }
+  }
+}

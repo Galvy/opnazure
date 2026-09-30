@@ -49,6 +49,19 @@ stage() { STAGE=$1; printf '%s\n' "$STAGE" > "$WORK/status"; log "$STAGE"; }
 fetch_file() {
     url=$1
     target=$2
+    # The standalone HA template embeds its artifacts. Only external upstream
+    # bootstrap/packages are downloaded; retain URL fetching for older scenarios.
+    if [ -n "${OPNAZURE_SOURCE:-}" ] && [ -n "${SCRIPT_URI:-}" ]; then
+        case "$url" in
+            "$SCRIPT_URI"*)
+                relative=${url#"$SCRIPT_URI"}
+                if [ -f "$OPNAZURE_SOURCE/$relative" ]; then
+                    cp "$OPNAZURE_SOURCE/$relative" "$target"
+                    return
+                fi
+                ;;
+        esac
+    fi
     attempt=1
     while ! fetch -T 60 -o "${target}.download" "$url"; do
         rm -f "${target}.download"
@@ -71,7 +84,10 @@ done
 # Decode without eval/source or interpolating user input into shell code.
 "$PYTHON" -c 'import base64,json,sys; print(json.dumps(json.loads(base64.b64decode(sys.argv[1],validate=True))))' "$1" > "$WORK/settings.json"
 SCRIPT_URI=$("$PYTHON" -c 'import json,re,sys; u=json.load(open(sys.argv[1]))["scriptURI"]; assert re.fullmatch(r"https://[A-Za-z0-9._~:/%+-]+/",u), "Invalid script URI"; print(u)' "$WORK/settings.json")
-for file in config.xml config-active-active-primary.xml config-active-active-secondary.xml get_nic_gw.py prepare_config.py actions_waagent.conf verify_opnsense.sh; do
+HA_ENABLED=$("$PYTHON" -c 'import json,sys; print("yes" if json.load(open(sys.argv[1])).get("ha") else "no")' "$WORK/settings.json")
+CONFIG_FILES="config.xml config-active-active-primary.xml config-active-active-secondary.xml"
+if [ "$HA_ENABLED" = yes ]; then CONFIG_FILES=config.xml; fi
+for file in $CONFIG_FILES get_nic_gw.py prepare_config.py actions_waagent.conf verify_opnsense.sh; do
     fetch_file "${SCRIPT_URI}${file}" "$WORK/$file"
 done
 BOOTSTRAP_COMMIT=db018c35aac47020c69dc507c3ae67a30dbdf2ab
@@ -144,6 +160,17 @@ date -u > "$WORK/first-boot-complete"
 trap - EXIT
 HOOK
 chmod 755 /usr/local/etc/rc.syshook.d/start/95-opnazure-verify
+
+# HA is optional; existing scenarios retain their original bootstrap.
+HA_ENABLED=$("$PYTHON" -c 'import json,sys; print("yes" if json.load(open(sys.argv[1])).get("ha") else "no")' "$WORK/settings.json")
+if [ "$HA_ENABLED" = yes ]; then
+    stage installing-active-backup
+    mkdir -p "$WORK/ha"
+    for file in agent.py install.py; do
+        fetch_file "${SCRIPT_URI}ha/$file" "$WORK/ha/$file"
+    done
+    /usr/local/bin/python3 "$WORK/ha/install.py" "$WORK/settings.json" "$WORK/ha/agent.py"
+fi
 
 stage checking-installed-packages
 OPN_VERSION=$(pkg query '%v' opnsense)

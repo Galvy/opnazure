@@ -42,6 +42,8 @@ def validate(settings):
 
 def config_filename(settings):
     role = validate(settings)["role"]
+    if settings.get("ha"):
+        return "config.xml"
     return {"TwoNics": "config.xml", "Primary": "config-active-active-primary.xml",
             "Secondary": "config-active-active-secondary.xml"}[role]
 
@@ -57,7 +59,27 @@ def render_config(source, settings):
     if root.tag != "opnsense":
         raise ValueError("Not an OPNsense configuration")
     role = settings["role"]
-    if role != "TwoNics":
+    if settings.get("ha"):
+        root.find("system/hostname").text = "OPNsense-" + settings["ha"]["node"]
+        system = root.find("system")
+        for dns in list(system.findall("dnsserver")):
+            system.remove(dns)
+        ET.SubElement(system, "dnsserver").text = "168.63.129.16"
+        if system.find("dnslocalhost") is None:
+            ET.SubElement(system, "dnslocalhost").text = "1"
+        for iface in ("wan", "lan"):
+            rule = ET.SubElement(root.find("filter"), "rule")
+            for tag, value in (("type", "pass"), ("interface", iface), ("ipprotocol", "inet"),
+                               ("protocol", "tcp"), ("descr", "Azure HA role probe"),
+                               ("statetype", "keep state")):
+                ET.SubElement(rule, tag).text = value
+            ET.SubElement(ET.SubElement(rule, "source"), "address").text = "168.63.129.16"
+            destination = ET.SubElement(rule, "destination")
+            ET.SubElement(destination, "network").text = iface + "ip"
+            ET.SubElement(destination, "port").text = "8080"
+            if iface == "lan":
+                ET.SubElement(rule, "reply-to").text = "LAN_GW"
+    elif role != "TwoNics":
         root.find("system/hostname").text = f"OPNsense-{role}"
         ha = root.find("hasync")
         if ha is None:
