@@ -77,7 +77,10 @@ class DeploymentTests(unittest.TestCase):
 
     def test_deploy_button_both_urls_point_at_branch(self):
         readme = (ROOT/'README.md').read_text()
-        links = re.findall(r'https://portal.azure.com/[^)\s]+', readme)
+        # This test owns the existing TwoNics/Active-Active button; the manual
+        # Active-Backup button has a separate template/form wiring test.
+        links = [url for url in re.findall(r'https://portal.azure.com/[^)\s]+', readme)
+                 if '/uri/'+BASE+'ARM/main.json' in unquote(url)]
         self.assertEqual(len(links), 1)
         link = unquote(links[0])
         self.assertIn('/uri/'+BASE+'ARM/main.json', link)

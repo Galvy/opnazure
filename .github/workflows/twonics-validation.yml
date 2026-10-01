@@ -23,6 +23,7 @@ jobs:
           cmp ARM/active-backup.json "$RUNNER_TEMP/active-backup.json"
           cmp bicep/main.parameters.json ARM/main.parameters.json
           cmp bicep/uiFormDefinition.json ARM/uiFormDefinition.json
+          cmp bicep/active-backup.uiFormDefinition.json ARM/active-backup.uiFormDefinition.json
       - name: Check shell scripts and provisioning regressions
         run: |
           sh -n scripts/embedded-bootstrap.sh

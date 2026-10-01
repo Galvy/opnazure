@@ -2,11 +2,11 @@
 
 ## Deploy Active-Backup for planned upgrades
 
-[![Deploy Active-Backup to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.json)
+[![Deploy Active-Backup to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.json/uiFormDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.uiFormDefinition.json)
 
 **Use this button for the new manual Active-Backup template.** It loads
 `ARM/active-backup.json` from `Galvy/opnazure`, branch
-`feature/active-backup-vpn-site`, using Azure's standard parameter form.
+`feature/active-backup-vpn-site`, with its dedicated guided form and VM size selector.
 There is no **OPNSense Scenario** selector: this template deploys only Active-Backup.
 If you see that selector, you have opened the older deployment form.
 

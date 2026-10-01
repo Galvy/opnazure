@@ -17,13 +17,19 @@ manual handover or VPN connectivity test has been performed for this variant.
 
 Use the **Deploy Active-Backup** button at the top of this branch's README:
 
-[![Deploy Active-Backup to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.json)
+[![Deploy Active-Backup to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.json/uiFormDefinitionUri/https%3A%2F%2Fraw.githubusercontent.com%2FGalvy%2Fopnazure%2Ffeature%2Factive-backup-vpn-site%2FARM%2Factive-backup.uiFormDefinition.json)
 
-It opens Azure's standard parameter form directly for Active-Backup. There is no
-**OPNSense Scenario** selector. Use a **new test resource group**.
+It opens the dedicated Active-Backup form: subscription/region, VM size and access,
+Azure network, then VPN ports and image revision. There is no
+**OPNSense Scenario** selector. The form requests a **new test resource group**.
+The VM selector is scoped to the selected subscription/region and counts two VMs.
+It offers x64 B2s and D2s/D4s/D8s v5 sizes with at least two NICs; actual availability
+and quota remain subject to Azure checks. Password entry is masked with confirmation.
+IPv4 CIDRs and port ranges are validated; Azure validates subnet containment and overlap.
+Only infrastructure/publication settings are collected, not VPN keys or business routes.
 
 Alternatively, load `ARM/active-backup.json` through Azure Portal: **Deploy a custom template → Build your own template in the editor → Load
-file**. Existing `ARM/main.json` buttons still deploy TwoNics/Active-Active.
+file**. Loading the ARM JSON alone uses Azure's plain parameter form; use the button for the guided interface. Existing `ARM/main.json` buttons still deploy TwoNics/Active-Active.
 
 The ARM file embeds the fork's scripts. It works without publishing the branch or
 opening a PR. Internet access is still required for the upstream OPNsense bootstrap
