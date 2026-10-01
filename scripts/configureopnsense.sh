@@ -86,7 +86,8 @@ done
 SCRIPT_URI=$("$PYTHON" -c 'import json,re,sys; u=json.load(open(sys.argv[1]))["scriptURI"]; assert re.fullmatch(r"https://[A-Za-z0-9._~:/%+-]+/",u), "Invalid script URI"; print(u)' "$WORK/settings.json")
 HA_ENABLED=$("$PYTHON" -c 'import json,sys; print("yes" if json.load(open(sys.argv[1])).get("ha") else "no")' "$WORK/settings.json")
 CONFIG_FILES="config.xml config-active-active-primary.xml config-active-active-secondary.xml"
-if [ "$HA_ENABLED" = yes ]; then CONFIG_FILES=config.xml; fi
+ROLE=$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["role"])' "$WORK/settings.json")
+if [ "$HA_ENABLED" = yes ] || [ "$ROLE" = TwoNics ]; then CONFIG_FILES=config.xml; fi
 for file in $CONFIG_FILES get_nic_gw.py prepare_config.py actions_waagent.conf verify_opnsense.sh; do
     fetch_file "${SCRIPT_URI}${file}" "$WORK/$file"
 done

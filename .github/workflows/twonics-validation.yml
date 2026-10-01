@@ -1,7 +1,7 @@
 name: OPNsense deployment validation
 on:
   push:
-    branches: ['update/freebsd15-opnsense26.7', 'feature/active-backup-vpn-site']
+    branches: ['update/freebsd15-opnsense26.7', 'feature/active-backup-vpn-site', 'feature/single-opnsense-site']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -21,6 +21,9 @@ jobs:
           cmp ARM/main.json "$RUNNER_TEMP/main.json"
           "$RUNNER_TEMP/bicep" build bicep/active-backup.bicep --outfile "$RUNNER_TEMP/active-backup.json"
           cmp ARM/active-backup.json "$RUNNER_TEMP/active-backup.json"
+          "$RUNNER_TEMP/bicep" build bicep/single-opnsense.bicep --outfile "$RUNNER_TEMP/single-opnsense.json"
+          cmp ARM/single-opnsense.json "$RUNNER_TEMP/single-opnsense.json"
+          cmp bicep/single-opnsense.uiFormDefinition.json ARM/single-opnsense.uiFormDefinition.json
           cmp bicep/main.parameters.json ARM/main.parameters.json
           cmp bicep/uiFormDefinition.json ARM/uiFormDefinition.json
           cmp bicep/active-backup.uiFormDefinition.json ARM/active-backup.uiFormDefinition.json

@@ -77,7 +77,10 @@ class FormTests(unittest.TestCase):
         raw = 'https://raw.githubusercontent.com/Galvy/opnazure/feature/active-backup-vpn-site/ARM/'
         for path in ('README.md', 'docs/active-backup.md'):
             text = (ROOT / path).read_text()
-            url = re.search(r'\]\((https://portal.azure.com/[^)]+)\)', text).group(1)
+            urls = [url for url in re.findall(r'\]\((https://portal.azure.com/[^)]+)\)', text)
+                    if '/uri/' + raw + 'active-backup.json/' in unquote(url)]
+            self.assertEqual(len(urls), 1)
+            url = urls[0]
             self.assertEqual(unquote(url), 'https://portal.azure.com/#create/Microsoft.Template/uri/' +
                              raw + 'active-backup.json/uiFormDefinitionUri/' + raw + 'active-backup.uiFormDefinition.json')
         self.assertEqual((ROOT / 'ARM/active-backup.uiFormDefinition.json').read_bytes(),

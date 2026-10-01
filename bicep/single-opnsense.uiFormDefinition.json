@@ -1,0 +1,270 @@
+{
+  "$schema": "http://schema.management.azure.com/schemas/2021-09-09/uiFormDefinition.schema.json#",
+  "view": {
+    "kind": "Form",
+    "properties": {
+      "title": "Single OPNsense — Azure cloud site",
+      "steps": [
+        {
+          "name": "basics",
+          "label": "Subscription and region",
+          "elements": [
+            {
+              "name": "resourceScope",
+              "type": "Microsoft.Common.ResourceScope",
+              "subscription": {
+                "constraints": {
+                  "validations": []
+                },
+                "resourceProviders": [
+                  "Microsoft.Compute",
+                  "Microsoft.Network"
+                ]
+              },
+              "location": {
+                "label": "Region",
+                "toolTip": "Choose the Azure region for both firewalls.",
+                "resourceTypes": [
+                  "Microsoft.Compute/virtualMachines"
+                ]
+              },
+              "resourceGroup": {
+                "allowExisting": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "virtualMachines",
+          "label": "Virtual machine and access",
+          "elements": [
+            {
+              "name": "virtualMachineName",
+              "type": "Microsoft.Common.TextBox",
+              "label": "OPNsense VM name",
+              "toolTip": "Name of the single OPNsense VM and prefix for its Azure resources.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^[A-Za-z][A-Za-z0-9-]{0,39}$",
+                    "message": "Use 1–40 letters, digits or hyphens, starting with a letter."
+                  }
+                ]
+              },
+              "defaultValue": "opn-cloud"
+            },
+            {
+              "name": "vmSize",
+              "type": "Microsoft.Compute.SizeSelector",
+              "label": "OPNsense VM size",
+              "toolTip": "Choose an x64 size with at least two NICs. Availability depends on the selected region and subscription.",
+              "recommendedSizes": [
+                "Standard_B2s",
+                "Standard_D2s_v5"
+              ],
+              "constraints": {
+                "allowedSizes": [
+                  "Standard_B2s",
+                  "Standard_D2s_v5",
+                  "Standard_D4s_v5",
+                  "Standard_D8s_v5"
+                ]
+              },
+              "osPlatform": "Linux",
+              "imageReference": {
+                "publisher": "freebsd",
+                "offer": "freebsd-15_1",
+                "sku": "15_1-release-amd64-gen2-zfs"
+              },
+              "count": 1,
+              "scope": {
+                "subscriptionId": "[steps('basics').resourceScope.subscription.subscriptionId]",
+                "location": "[steps('basics').resourceScope.location.name]"
+              }
+            },
+            {
+              "name": "managementSourceCIDR",
+              "type": "Microsoft.Common.TextBox",
+              "label": "Your public IPv4 CIDR for management",
+              "toolTip": "Your public IPv4 address followed by /32. Permits access to the OPNsense GUI over HTTPS 443.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(?:[0-9]|[12][0-9]|3[0-2])$",
+                    "message": "Enter a valid IPv4 CIDR, for example 203.0.113.10/32."
+                  }
+                ]
+              }
+            },
+            {
+              "name": "bootstrapAdminPassword",
+              "type": "Microsoft.Common.PasswordBox",
+              "label": {
+                "password": "Temporary Azure bootstrap password",
+                "confirmPassword": "Confirm bootstrap password"
+              },
+              "toolTip": "Used for the initial FreeBSD administrator. Change the initial OPNsense root password after conversion.",
+              "constraints": {
+                "required": true,
+                "regex": "^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9\\s])\\S{12,72}$",
+                "validationMessage": "Use 12–72 characters, including uppercase, lowercase, number and symbol, without spaces."
+              },
+              "options": {
+                "hideConfirmation": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "network",
+          "label": "Azure network",
+          "elements": [
+            {
+              "name": "vnetCIDR",
+              "type": "Microsoft.Common.TextBox",
+              "label": "New VNet address space",
+              "toolTip": "Choose a network that does not overlap your company sites or other connected networks.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(?:[89]|1[0-9]|2[0-9])$",
+                    "message": "Enter an IPv4 network CIDR with prefix /8 to /29. Azure checks subnet containment and overlap."
+                  }
+                ]
+              },
+              "defaultValue": "10.80.0.0/16"
+            },
+            {
+              "name": "wanSubnetCIDR",
+              "type": "Microsoft.Common.TextBox",
+              "label": "WAN subnet",
+              "toolTip": "Contains the WAN NIC with its public IP. Must be inside the VNet and separate from the other subnets.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(?:[89]|1[0-9]|2[0-9])$",
+                    "message": "Enter an IPv4 network CIDR with prefix /8 to /29. Azure checks subnet containment and overlap."
+                  }
+                ]
+              },
+              "defaultValue": "10.80.0.0/24"
+            },
+            {
+              "name": "trustedTransitCIDR",
+              "type": "Microsoft.Common.TextBox",
+              "label": "Trusted transit subnet",
+              "toolTip": "Contains the OPNsense LAN NIC, used as the next hop for workload routing. Keep workload VMs in Trusted-Servers.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(?:[89]|1[0-9]|2[0-9])$",
+                    "message": "Enter an IPv4 network CIDR with prefix /8 to /29. Azure checks subnet containment and overlap."
+                  }
+                ]
+              },
+              "defaultValue": "10.80.1.0/24"
+            },
+            {
+              "name": "serversSubnetCIDR",
+              "type": "Microsoft.Common.TextBox",
+              "label": "Trusted servers subnet",
+              "toolTip": "Reserved for your Windows/server VMs. Must be inside the VNet and separate from WAN and transit. No server VM or business route is deployed.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(?:[89]|1[0-9]|2[0-9])$",
+                    "message": "Enter an IPv4 network CIDR with prefix /8 to /29. Azure checks subnet containment and overlap."
+                  }
+                ]
+              },
+              "defaultValue": "10.80.2.0/24"
+            }
+          ]
+        },
+        {
+          "name": "vpn",
+          "label": "VPN ports and image",
+          "elements": [
+            {
+              "name": "openVpnPort",
+              "type": "Microsoft.Common.TextBox",
+              "label": "OpenVPN UDP port",
+              "toolTip": "Allows this UDP port in the Azure NSG. Configure OpenVPN and its guest firewall rules manually.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(?:102[4-9]|10[3-9][0-9]|1[1-9][0-9]{2}|[2-9][0-9]{3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
+                    "message": "Enter a UDP port between 1024 and 65535."
+                  }
+                ]
+              },
+              "defaultValue": "1194"
+            },
+            {
+              "name": "wireGuardPort",
+              "type": "Microsoft.Common.TextBox",
+              "label": "WireGuard UDP port",
+              "toolTip": "Allows this UDP port in the Azure NSG. Configure WireGuard manually and use a different port from OpenVPN.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(?:102[4-9]|10[3-9][0-9]|1[1-9][0-9]{2}|[2-9][0-9]{3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
+                    "message": "Enter a UDP port between 1024 and 65535."
+                  },
+                  {
+                    "isValid": "[not(equals(steps('vpn').wireGuardPort, steps('vpn').openVpnPort))]",
+                    "message": "WireGuard and OpenVPN must use different UDP ports."
+                  }
+                ]
+              },
+              "defaultValue": "51820"
+            },
+            {
+              "name": "imageVersion",
+              "type": "Microsoft.Common.TextBox",
+              "label": "FreeBSD 15.1 image revision",
+              "toolTip": "Use latest for the first test or pin a Marketplace revision. Installs OPNsense 26.7 on one VM.",
+              "constraints": {
+                "required": true,
+                "validations": [
+                  {
+                    "regex": "^(latest|[0-9]+\\.[0-9]+\\.[0-9]+)$",
+                    "message": "Use latest or a numeric image revision such as 1.0.0."
+                  }
+                ]
+              },
+              "defaultValue": "latest"
+            }
+          ]
+        }
+      ]
+    },
+    "outputs": {
+      "parameters": {
+        "location": "[steps('basics').resourceScope.location.name]",
+        "virtualMachineSize": "[steps('virtualMachines').vmSize]",
+        "managementSourceCIDR": "[steps('virtualMachines').managementSourceCIDR]",
+        "bootstrapAdminPassword": "[steps('virtualMachines').bootstrapAdminPassword]",
+        "vnetCIDR": "[steps('network').vnetCIDR]",
+        "wanSubnetCIDR": "[steps('network').wanSubnetCIDR]",
+        "trustedTransitCIDR": "[steps('network').trustedTransitCIDR]",
+        "serversSubnetCIDR": "[steps('network').serversSubnetCIDR]",
+        "openVpnPort": "[int(steps('vpn').openVpnPort)]",
+        "wireGuardPort": "[int(steps('vpn').wireGuardPort)]",
+        "imageVersion": "[steps('vpn').imageVersion]",
+        "virtualMachineName": "[steps('virtualMachines').virtualMachineName]"
+      },
+      "kind": "ResourceGroup",
+      "location": "[steps('basics').resourceScope.location.name]",
+      "resourceGroupId": "[steps('basics').resourceScope.resourceGroup.id]"
+    }
+  }
+}

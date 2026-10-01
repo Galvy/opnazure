@@ -228,7 +228,7 @@ resource availability 'Microsoft.Compute/availabilitySets@2023-07-01' = {
     platformUpdateDomainCount: 2
   }
 }
-module nodes 'VM/opnsense-ha.bicep' = [for (role, i) in roles: {
+module nodes 'VM/opnsense-embedded.bicep' = [for (role, i) in roles: {
   name: '${virtualMachineName}-${role}'
   params: {
     Location: Location
