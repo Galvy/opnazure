@@ -156,7 +156,7 @@
             {
               "name": "trustedTransitCIDR",
               "type": "Microsoft.Common.TextBox",
-              "label": "Trusted transit subnet",
+              "label": "Subnet LAN del firewall",
               "toolTip": "Contains the OPNsense LAN NIC, used as the next hop for workload routing. Keep workload VMs in Trusted-Servers.",
               "constraints": {
                 "required": true,
