@@ -65,7 +65,7 @@ module nsg 'modules/vnet/nsg.bicep' = {
           sourceAddressPrefix: managementSourceCIDR
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
-          destinationPortRange: '443'
+          destinationPortRange: '50443'
         }
       }
       {
@@ -78,7 +78,7 @@ module nsg 'modules/vnet/nsg.bicep' = {
           sourceAddressPrefix: 'Internet'
           sourcePortRange: '*'
           destinationAddressPrefix: '*'
-          destinationPortRanges: ['22', '443']
+          destinationPortRanges: ['22', '443', '50443']
         }
       }
       {
@@ -112,6 +112,7 @@ module firewall 'modules/VM/opnsense-embedded.bicep' = {
     nsgId: nsg.outputs.nsgID
     ShellScriptObj: {
       OpnScriptURI: scriptURI
+      managementPort: 50443
       OpnVersion: '26.7'
       WALinuxVersion: '2.15.0.1'
       OpnType: 'TwoNics'
@@ -123,7 +124,7 @@ module firewall 'modules/VM/opnsense-embedded.bicep' = {
   dependsOn: [vnet]
 }
 output publicIPAddress string = publicIP.outputs.publicipAddress
-output managementURL string = 'https://${publicIP.outputs.publicipAddress}'
+output managementURL string = 'https://${publicIP.outputs.publicipAddress}:50443'
 output trustedNextHop string = firewall.outputs.trustedNicIP
 output wanPrivateIPAddress string = firewall.outputs.untrustedNicIP
 output serversSubnetId string = resourceId('Microsoft.Network/virtualNetworks/subnets', vnetName, 'Trusted-Servers')

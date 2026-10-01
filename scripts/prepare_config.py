@@ -21,6 +21,9 @@ def validate(settings):
         raise ValueError("scriptURI must be an HTTPS directory URL")
     if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){2,3}", settings["agentMinimumVersion"]):
         raise ValueError("Invalid minimum agent version")
+    port = settings.get("managementPort", 443)
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError("Invalid management TCP port")
     gateway(settings["trustedSubnet"])
     windows = settings.get("windowsSubnet", "")
     if windows:
@@ -63,6 +66,18 @@ def render_config(source, settings):
     root = ET.fromstring(text)
     if root.tag != "opnsense":
         raise ValueError("Not an OPNsense configuration")
+    if "managementPort" in settings:
+        webgui = root.find("system/webgui")
+        old_port = webgui.findtext("port") or "443"
+        port = str(settings["managementPort"])
+        webgui.find("port").text = port
+        # Change only the existing WAN management rule, never unrelated HTTPS services.
+        for rule in root.findall("filter/rule"):
+            if (rule.findtext("interface") == "wan" and
+                    rule.findtext("protocol") == "tcp" and
+                    rule.findtext("destination/network") == "wanip" and
+                    rule.findtext("destination/port") == old_port):
+                rule.find("destination/port").text = port
     role = settings["role"]
     if settings.get("ha"):
         root.find("system/hostname").text = "OPNsense-" + settings["ha"]["node"]

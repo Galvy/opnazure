@@ -87,7 +87,7 @@
               "name": "managementSourceCIDR",
               "type": "Microsoft.Common.TextBox",
               "label": "Your public IPv4 CIDR for management",
-              "toolTip": "Your public IPv4 address followed by /32. Permits access to the OPNsense GUI over HTTPS 443.",
+              "toolTip": "Your public IPv4 address followed by /32. Permits access to the OPNsense GUI over HTTPS 50443.",
               "constraints": {
                 "required": true,
                 "validations": [

@@ -18,7 +18,7 @@ x64 VM, management CIDR, password confirmation, Azure subnets and UDP VPN ports.
 Use a new test resource group. The initial OPNsense root password must be changed
 after conversion; the Azure bootstrap password is a separate credential.
 
-- Standard public IP directly on the WAN NIC; HTTPS management on **443** from your CIDR.
+- Standard public IP directly on the WAN NIC; HTTPS management on **50443** from your CIDR.
 - LAN NIC as the route-table next hop; separate Trusted-Servers subnet for workloads.
 - NSG permits IPsec NAT-T UDP 500/4500, OpenVPN UDP 1194 and WireGuard UDP 51820 by default.
 - No load balancer, second firewall, HA agent, witness, handover script or automatic failover is deployed.

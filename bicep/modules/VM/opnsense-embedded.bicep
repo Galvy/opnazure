@@ -85,6 +85,7 @@ var bootstrapSettings = {
   scriptURI: ShellScriptObj.OpnScriptURI
   opnVersion: ShellScriptObj.OpnVersion
   agentMinimumVersion: ShellScriptObj.WALinuxVersion
+  managementPort: ShellScriptObj.?managementPort ?? 443
   role: ShellScriptObj.OpnType
   publicIPAddress: ShellScriptObj.publicIPAddress
   localTrustedIP: ShellScriptObj.?localTrustedIP ?? ''

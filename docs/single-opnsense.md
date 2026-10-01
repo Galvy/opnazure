@@ -24,10 +24,9 @@ witness or managed identity is created.
 
 ## Access and network
 
-`managementURL` is `https://PUBLIC_IP` (TCP **443**, no 50443/50444 NAT mapping).
+`managementURL` is `https://PUBLIC_IP:50443` (TCP **50443**, directly on the firewall).
 The NSG permits HTTPS from `managementSourceCIDR` and denies public SSH. Enable SSH
-and adjust its rules yourself only if required. The proposed GUI port change to
-50443 has not been implemented.
+and adjust its rules yourself only if required. The bootstrap configures the GUI listener and its WAN firewall rule on TCP 50443.
 
 Wait for bootstrap and reboot, then check `/var/db/opnazure/status` and logs under
 `/var/log/opnazure-bootstrap.log` and `/var/log/opnazure-firstboot.log`. Change the

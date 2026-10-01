@@ -25,7 +25,18 @@ service waagent onestatus
 fetch -T 15 -o /dev/null 'http://168.63.129.16/?comp=versions'
 pkg check -d -a
 pgrep -x configd >/dev/null || pgrep -f '/usr/local/opnsense/service/configd.py' >/dev/null
-sockstat -4 -l | awk '$6 ~ /:443$/ { found=1 } END { exit !found }'
+# Read the actual GUI port so existing templates retain their HTTPS 443 checks.
+# PHP variables must not be expanded by the shell.
+# shellcheck disable=SC2016
+management_port=$(/usr/local/bin/php -r '
+$c = simplexml_load_file("/conf/config.xml");
+if ($c === false) { exit(1); }
+$p = trim((string)$c->system->webgui->port);
+if ($p === "") { $p = "443"; }
+if (!ctype_digit($p) || (int)$p < 1 || (int)$p > 65535) { exit(1); }
+echo $p;
+')
+sockstat -4 -l | awk -v port="$management_port" '$6 ~ (":" port "$") { found=1 } END { exit !found }'
 pfctl -s info | grep -q 'Status: Enabled'
 opnsense-version -a
 freebsd-version -kru

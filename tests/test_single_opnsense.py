@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import re
 import unittest
+import xml.etree.ElementTree as ET
+from test_twonic import SETTINGS, render_config
 from urllib.parse import unquote
 from test_ha_artifacts import objects
 import test_bootstrap_flow
@@ -48,6 +50,26 @@ class SingleTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, log + result.stderr)
         self.assertNotIn('config-active-active', events)
         self.assertEqual(status.strip(), 'awaiting-reboot')
+
+    def test_management_port_matches_guest_nsg_and_output(self):
+        module = next(o for o in self.arm['resources'] if 'ShellScriptObj' in o['properties']['parameters'])
+        port = module['properties']['parameters']['ShellScriptObj']['value']['managementPort']
+        self.assertEqual(port, 50443)
+        source = (ROOT / 'scripts/config.xml').read_text()
+        tree = ET.fromstring(render_config(source, dict(SETTINGS, managementPort=port)))
+        self.assertEqual(tree.findtext('system/webgui/port'), '50443')
+        wan_ports = [r.findtext('destination/port') for r in tree.findall('filter/rule')
+                     if r.findtext('interface') == 'wan' and r.findtext('protocol') == 'tcp']
+        self.assertIn('50443', wan_ports)
+        self.assertNotIn('443', wan_ports)
+        self.assertEqual(tree.findtext('.//sslPorts'),
+                         ET.fromstring(source).findtext('.//sslPorts'))
+        rules = [o for o in objects(self.arm) if o.get('name') == 'Management-HTTPS']
+        self.assertEqual(rules[0]['properties']['destinationPortRange'], '50443')
+        self.assertIn(':50443', self.arm['outputs']['managementURL']['value'])
+        original = ET.fromstring(render_config(source, SETTINGS))
+        self.assertFalse(original.findtext('system/webgui/port'))
+        self.assertEqual(original.findtext('filter/rule/destination/port'), '443')
 
     def test_form_selects_one_vm_and_wires_required_parameters(self):
         self.assertEqual((ROOT/'ARM/single-opnsense.uiFormDefinition.json').read_bytes(),
